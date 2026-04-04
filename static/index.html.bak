@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendar Agent — Multi-Org</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="logo">
+        <span class="logo-icon">📅</span>
+        <span class="logo-text">Calendar Agent</span>
+      </div>
+
+      <!-- Org Selector -->
+      <div id="org-selector" class="org-selector" style="display:none">
+        <select id="org-dropdown" class="org-dropdown" onchange="switchOrg()"></select>
+      </div>
+
+      <nav>
+        <button class="nav-btn active" data-view="chat">💬 Chat</button>
+        <button class="nav-btn" data-view="calendar">📆 Calendar</button>
+        <button class="nav-btn" data-view="email">📧 Email Intel</button>
+        <button class="nav-btn" data-view="org-settings">🏢 Organization</button>
+        <button class="nav-btn" data-view="settings">⚙️ Settings</button>
+        <button class="nav-btn" data-view="profile">👤 Profile</button>
+      </nav>
+      <div id="connection-status" class="status-dot offline">
+        <span class="dot"></span> Disconnected
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main id="main">
+
+      <!-- Login Screen -->
+      <section id="login-view" class="view active">
+        <div class="login-card">
+          <h1>📅 Calendar Agent</h1>
+          <p>AI-powered calendar management for teams</p>
+          <button class="btn btn-google" onclick="loginGoogle()">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 2.58z"/></svg>
+            Sign in with Google
+          </button>
+          <button class="btn btn-microsoft" onclick="loginMicrosoft()">
+            <svg width="14" height="14" viewBox="0 0 18 18"><rect fill="#f25022" x="0" y="0" width="8" height="8"/><rect fill="#7fba00" x="10" y="0" width="8" height="8"/><rect fill="#00a4ef" x="0" y="10" width="8" height="8"/><rect fill="#ffb900" x="10" y="10" width="8" height="8"/></svg>
+            Sign in with Microsoft
+          </button>
+          <div class="divider"><span>or</span></div>
+          <button class="btn btn-dev" onclick="loginDev()">🔧 Dev Login (test user)</button>
+        </div>
+      </section>
+
+      <!-- Chat View -->
+      <section id="chat-view" class="view">
+        <div class="chat-header">
+          <h2>💬 Chat with Calendar Agent</h2>
+          <span id="chat-model" class="badge">AI</span>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+          <div class="message assistant">
+            <div class="message-avatar">🤖</div>
+            <div class="message-content">
+              <p>Hi! I'm your Calendar Agent. I can help you manage calendars across Gmail and Outlook.</p>
+              <ul>
+                <li>📋 View your schedule — <em>"What's on my calendar today?"</em></li>
+                <li>➕ Create events — <em>"Schedule a meeting tomorrow at 2pm"</em></li>
+                <li>🔍 Find free time — <em>"When am I free this week?"</em></li>
+                <li>❌ Cancel events — <em>"Cancel my 3pm meeting"</em></li>
+              </ul>
+              <p>What would you like to do?</p>
+            </div>
+          </div>
+        </div>
+        <form id="chat-form" class="chat-input-area" onsubmit="sendMessage(event)">
+          <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
+          <button type="submit" class="btn btn-send" id="btn-send">Send</button>
+        </form>
+      </section>
+
+      <!-- Calendar View -->
+      <section id="calendar-view" class="view">
+        <div class="calendar-header">
+          <h2>📆 Your Calendar</h2>
+          <div class="calendar-controls">
+            <button class="btn btn-sm" onclick="shiftWeek(-1)">← Prev</button>
+            <span id="week-label"></span>
+            <button class="btn btn-sm" onclick="shiftWeek(1)">Next →</button>
+          </div>
+        </div>
+        <div id="events-list" class="events-list">
+          <div class="empty-state">Loading events...</div>
+        </div>
+      </section>
+
+      <!-- Email Intelligence View -->
+      <section id="email-view" class="view">
+        <div class="email-container">
+
+          <!-- Header with scan controls -->
+          <div class="email-header">
+            <div class="email-header-left">
+              <h2>📧 Email Intelligence</h2>
+              <p class="text-muted">AI-powered meeting &amp; task detection from your inbox</p>
+            </div>
+            <div class="email-header-actions">
+              <select id="email-provider-select" class="org-dropdown">
+                <option value="google">Gmail</option>
+                <option value="microsoft">Outlook</option>
+              </select>
+              <select id="email-since-hours" class="org-dropdown">
+                <option value="24">Last 24h</option>
+                <option value="48">Last 48h</option>
+                <option value="72">Last 3 days</option>
+                <option value="168">Last 7 days</option>
+              </select>
+              <button class="btn btn-send btn-sm" id="btn-email-scan" onclick="triggerEmailScan()">
+                🔍 Scan Inbox
+              </button>
+            </div>
+          </div>
+
+          <!-- Scan status bar -->
+          <div id="email-scan-status" class="email-scan-status" style="display:none">
+            <span id="email-scan-text"></span>
+          </div>
+
+          <!-- Connected providers -->
+          <div class="email-providers-bar" id="email-providers-bar"></div>
+
+          <!-- Tab navigation -->
+          <div class="email-tabs">
+            <button class="email-tab active" data-tab="emails" onclick="switchEmailTab('emails')">
+              📨 All Emails <span id="tab-count-emails" class="tab-count">0</span>
+            </button>
+            <button class="email-tab" data-tab="pending" onclick="switchEmailTab('pending')">
+              ⏳ Pending <span id="tab-count-pending" class="tab-count">0</span>
+            </button>
+            <button class="email-tab" data-tab="approved" onclick="switchEmailTab('approved')">
+              ✅ Approved <span id="tab-count-approved" class="tab-count">0</span>
+            </button>
+            <button class="email-tab" data-tab="rejected" onclick="switchEmailTab('rejected')">
+              ❌ Rejected <span id="tab-count-rejected" class="tab-count">0</span>
+            </button>
+            <button class="email-tab" data-tab="history" onclick="switchEmailTab('history')">
+              📊 Scan History
+            </button>
+          </div>
+
+          <!-- Scanned emails list -->
+          <div id="email-all-list" class="email-suggestions">
+            <div class="empty-state">Click "Scan Inbox" to scan your emails.</div>
+          </div>
+
+          <!-- Suggestions list -->
+          <div id="email-suggestions" class="email-suggestions" style="display:none">
+            <div class="empty-state">Click "Scan Inbox" to analyze your emails for meetings, tasks &amp; appointments.</div>
+          </div>
+
+          <!-- Scan history (hidden by default) -->
+          <div id="email-history" class="email-suggestions" style="display:none"></div>
+
+        </div>
+      </section>
+
+      <!-- Organization Settings View -->
+      <section id="org-settings-view" class="view">
+        <div class="org-container">
+
+          <!-- Create Org -->
+          <div id="org-create-panel" class="panel" style="display:none">
+            <h2>🏢 Create Your Organization</h2>
+            <p class="text-muted">Set up your team to manage calendars together across Gmail &amp; Outlook.</p>
+            <div class="form-group">
+              <label>Organization Name</label>
+              <input id="new-org-name" type="text" placeholder="e.g. Acme Corp" class="input" />
+            </div>
+            <div class="form-group">
+              <label>Email Domain (optional — for auto-join)</label>
+              <input id="new-org-domain" type="text" placeholder="e.g. acme.com" class="input" />
+            </div>
+            <button class="btn btn-send" onclick="createOrg()">Create Organization</button>
+          </div>
+
+          <!-- Org Dashboard -->
+          <div id="org-dashboard" style="display:none">
+
+            <div class="panel">
+              <h2>🏢 <span id="org-name-display"></span></h2>
+              <div class="org-meta">
+                <span class="badge" id="org-member-count"></span>
+                <span class="text-muted" id="org-domain-display"></span>
+              </div>
+            </div>
+
+            <!-- Members -->
+            <div class="panel">
+              <div class="panel-header">
+                <h3>👥 Members</h3>
+                <button class="btn btn-sm btn-accent" onclick="showInviteModal()">+ Invite</button>
+              </div>
+              <div id="members-list" class="members-list"></div>
+            </div>
+
+            <!-- Provider Connections -->
+            <div class="panel">
+              <div class="panel-header">
+                <h3>🔗 Connected Accounts</h3>
+              </div>
+              <p class="text-muted" style="margin-bottom:.75rem">Connect your email accounts to sync calendar events automatically.</p>
+
+              <!-- Google Setup Guide (shown when not configured) -->
+              <div id="google-setup-guide" class="setup-guide" style="display:none">
+                <div class="setup-guide-header">
+                  <span>🔧</span>
+                  <strong>Google Calendar Setup Required</strong>
+                </div>
+                <div class="setup-guide-body">
+                  <p>To connect your Gmail calendar, you need Google OAuth credentials:</p>
+                  <ol>
+                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → Credentials</a></li>
+                    <li>Create a project (or select existing)</li>
+                    <li>Enable the <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Google Calendar API</a></li>
+                    <li>Create <strong>OAuth 2.0 Client ID</strong> (Web application)</li>
+                    <li>Add redirect URI: <code id="google-redirect-uri">http://localhost:8000/api/v1/orgs/google-callback</code></li>
+                    <li>Copy Client ID &amp; Secret → paste in <a href="#" onclick="switchView('settings'); return false;">⚙️ Settings → Google OAuth</a></li>
+                  </ol>
+                  <div class="setup-guide-actions">
+                    <a class="btn btn-sm btn-accent" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Open Google Cloud Console</a>
+                    <button class="btn btn-sm" onclick="switchView('settings')">Open Settings</button>
+                    <button class="btn btn-sm" onclick="checkGoogleSetup()">🔄 Re-check</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="providers-list" class="providers-list"></div>
+              <div class="provider-actions">
+                <button class="btn btn-google btn-sm" onclick="connectProvider('google')">
+                  🔒 Connect Gmail (OAuth)
+                </button>
+                <button class="btn btn-microsoft btn-sm" onclick="connectProvider('microsoft')">
+                  Connect Outlook
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- Profile View -->
+      <section id="profile-view" class="view">
+        <div class="profile-card">
+          <h2>👤 Profile</h2>
+          <div id="profile-data" class="profile-data"><div class="empty-state">Loading...</div></div>
+          <button class="btn btn-danger" onclick="logout()" style="margin-top:1.5rem">Logout</button>
+        </div>
+      </section>
+
+      <!-- Settings View -->
+      <section id="settings-view" class="view">
+        <div class="settings-container">
+          <div class="settings-header">
+            <h2>⚙️ Configuration</h2>
+            <p class="text-muted">Manage application settings without editing .env files. Changes are persisted to the database and take effect immediately.</p>
+          </div>
+          <div id="settings-sections"></div>
+          <div id="settings-toast" class="settings-toast"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Invite Modal -->
+  <div id="invite-modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <h3>Invite Team Member</h3>
+      <div class="form-group">
+        <label>Email Address</label>
+        <input id="invite-email" type="email" placeholder="colleague@company.com" class="input" />
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <select id="invite-role" class="input">
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+          <option value="viewer">Viewer</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-sm" onclick="hideInviteModal()">Cancel</button>
+        <button class="btn btn-send btn-sm" onclick="inviteMember()">Send Invite</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

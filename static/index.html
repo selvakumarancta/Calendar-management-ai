@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AI-powered calendar management — scan emails, schedule meetings, manage your time.">
+  <title>Chronos — AI Calendar Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════════ Sidebar ═══════════════ -->
+    <aside id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <span class="brand-name">Chronos</span>
+        <span class="brand-badge">AI</span>
+      </div>
+
+      <div id="org-selector" class="org-selector" style="display:none">
+        <select id="org-dropdown" class="select-minimal" onchange="switchOrg()"></select>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-view="chat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Chat</span>
+        </button>
+        <button class="nav-btn" data-view="calendar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Calendar</span>
+        </button>
+        <button class="nav-btn" data-view="email">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <span>Email Intel</span>
+        </button>
+        <div class="nav-divider"></div>
+        <button class="nav-btn" data-view="org-settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Team</span>
+        </button>
+        <button class="nav-btn" data-view="settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09c-.66.026-1.25.42-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-btn" data-view="profile">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>Profile</span>
+        </button>
+        <div id="connection-status" class="conn-status offline">
+          <span class="conn-dot"></span><span class="conn-label">Offline</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ═══════════════ Main ═══════════════ -->
+    <main id="main">
+
+      <!-- Login -->
+      <section id="login-view" class="view active">
+        <div class="login-screen">
+          <div class="login-card">
+            <div class="login-brand">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14.01"/><line x1="12" y1="14" x2="12" y2="14.01"/><line x1="16" y1="14" x2="16" y2="14.01"/><line x1="8" y1="18" x2="8" y2="18.01"/><line x1="12" y1="18" x2="12" y2="18.01"/></svg>
+              <h1>Chronos</h1>
+              <p>AI-powered calendar management for teams</p>
+            </div>
+            <div class="login-actions">
+              <button class="btn btn-google" onclick="loginGoogle()">
+                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 2.58z"/></svg>
+                Continue with Google
+              </button>
+              <button class="btn btn-microsoft" onclick="loginMicrosoft()">
+                <svg width="16" height="16" viewBox="0 0 21 21"><rect fill="#f25022" width="10" height="10"/><rect fill="#7fba00" x="11" width="10" height="10"/><rect fill="#00a4ef" y="11" width="10" height="10"/><rect fill="#ffb900" x="11" y="11" width="10" height="10"/></svg>
+                Continue with Microsoft
+              </button>
+              <div class="login-divider"><span>or</span></div>
+              <button class="btn btn-ghost" onclick="loginDev()">Sign in as Demo User</button>
+            </div>
+            <p class="login-footer">By signing in you agree to our Terms of Service</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chat -->
+      <section id="chat-view" class="view">
+        <div class="view-header">
+          <div class="view-header-left"><h2>AI Assistant</h2><span class="header-badge" id="chat-model">Online</span></div>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+          <div class="message assistant">
+            <div class="message-avatar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </div>
+            <div class="message-content">
+              <p>Hi! I'm your calendar assistant. What can I help you with?</p>
+              <div class="quick-actions">
+                <button class="quick-btn" onclick="quickChat('What is on my calendar today?')">Today&rsquo;s schedule</button>
+                <button class="quick-btn" onclick="quickChat('Schedule a meeting tomorrow at 2pm')">New meeting</button>
+                <button class="quick-btn" onclick="quickChat('When am I free this week?')">Find free time</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <form id="chat-form" class="chat-input-area" onsubmit="sendMessage(event)">
+          <input type="text" id="chat-input" placeholder="Ask me anything about your schedule..." autocomplete="off" />
+          <button type="submit" class="btn btn-primary btn-icon-only" id="btn-send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </form>
+      </section>
+
+      <!-- Calendar -->
+      <section id="calendar-view" class="view">
+        <div class="view-header">
+          <div class="view-header-left"><h2>Calendar</h2></div>
+          <div class="view-header-right">
+            <button class="btn btn-icon" onclick="shiftWeek(-1)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <span id="week-label" class="week-label"></span>
+            <button class="btn btn-icon" onclick="shiftWeek(1)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>
+            <button class="btn btn-ghost btn-sm" onclick="weekOffset=0;loadEvents()">Today</button>
+          </div>
+        </div>
+        <div id="events-list" class="events-list content-scroll">
+          <div class="empty-state"><div class="empty-icon">📅</div>Loading events...</div>
+        </div>
+      </section>
+
+      <!-- Email Intel -->
+      <section id="email-view" class="view">
+        <div class="email-container">
+          <div class="view-header">
+            <div class="view-header-left"><h2>Email Intelligence</h2><span class="header-subtitle">AI-powered meeting detection</span></div>
+            <div class="view-header-right email-controls">
+              <select id="email-provider-select" class="select-minimal"><option value="google">Gmail</option><option value="microsoft">Outlook</option></select>
+              <select id="email-since-hours" class="select-minimal"><option value="24">24h</option><option value="48">48h</option><option value="72">3 days</option><option value="168">7 days</option></select>
+              <button class="btn btn-primary btn-sm" id="btn-email-scan" onclick="triggerEmailScan()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Scan
+              </button>
+            </div>
+          </div>
+          <div id="email-scan-status" class="scan-banner" style="display:none"><span id="email-scan-text"></span></div>
+          <div class="email-providers-bar" id="email-providers-bar"></div>
+          <div class="tab-bar">
+            <button class="tab active" data-tab="emails" onclick="switchEmailTab('emails')">All Emails <span id="tab-count-emails" class="tab-count">0</span></button>
+            <button class="tab" data-tab="pending" onclick="switchEmailTab('pending')">Pending <span id="tab-count-pending" class="tab-count">0</span></button>
+            <button class="tab" data-tab="approved" onclick="switchEmailTab('approved')">Approved <span id="tab-count-approved" class="tab-count">0</span></button>
+            <button class="tab" data-tab="rejected" onclick="switchEmailTab('rejected')">Dismissed <span id="tab-count-rejected" class="tab-count">0</span></button>
+            <button class="tab" data-tab="history" onclick="switchEmailTab('history')">History</button>
+          </div>
+          <div id="email-all-list" class="content-scroll"><div class="empty-state"><div class="empty-icon">📬</div>Scan your inbox to detect meetings</div></div>
+          <div id="email-suggestions" class="content-scroll" style="display:none"><div class="empty-state"><div class="empty-icon">💡</div>Suggestions appear after scanning</div></div>
+          <div id="email-history" class="content-scroll" style="display:none"></div>
+        </div>
+      </section>
+
+      <!-- Team -->
+      <section id="org-settings-view" class="view">
+        <div class="view-header"><div class="view-header-left"><h2>Team</h2></div></div>
+        <div class="content-scroll padded">
+          <div id="org-create-panel" class="card" style="display:none"><div class="card-body">
+            <h3>Create Organization</h3><p class="text-muted">Set up your team to manage calendars together.</p>
+            <div class="form-group"><label>Organization Name</label><input id="new-org-name" type="text" placeholder="e.g. Acme Corp" class="input" /></div>
+            <div class="form-group"><label>Email Domain <span class="text-muted">(optional)</span></label><input id="new-org-domain" type="text" placeholder="e.g. acme.com" class="input" /></div>
+            <button class="btn btn-primary" onclick="createOrg()">Create Organization</button>
+          </div></div>
+          <div id="org-dashboard" style="display:none">
+            <div class="card"><div class="card-body"><h3><span id="org-name-display"></span></h3><div class="org-meta"><span class="badge" id="org-member-count"></span><span class="text-muted" id="org-domain-display"></span></div></div></div>
+            <div class="card">
+              <div class="card-header"><h4>Members</h4><button class="btn btn-primary btn-sm" onclick="showInviteModal()">+ Invite</button></div>
+              <div id="members-list" class="card-list"></div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h4>Connected Accounts</h4></div>
+              <div class="card-body"><p class="text-muted">Connect email accounts to sync calendars.</p>
+                <div id="google-setup-guide" class="alert alert-info" style="display:none"><strong>Google Setup Required</strong><p>Configure OAuth in Settings first.</p><div style="margin-top:.5rem;display:flex;gap:.5rem"><a class="btn btn-primary btn-sm" href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Console</a><button class="btn btn-ghost btn-sm" onclick="switchView('settings')">Settings</button><button class="btn btn-ghost btn-sm" onclick="checkGoogleSetup()">Re-check</button></div></div>
+              </div>
+              <div id="providers-list" class="card-list"></div>
+              <div class="card-footer"><button class="btn btn-google btn-sm" onclick="connectProvider('google')">Connect Gmail</button><button class="btn btn-microsoft btn-sm" onclick="connectProvider('microsoft')">Connect Outlook</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Profile -->
+      <section id="profile-view" class="view">
+        <div class="view-header"><div class="view-header-left"><h2>Profile</h2></div></div>
+        <div class="content-scroll padded"><div class="card"><div class="card-body">
+          <div id="profile-data"><div class="empty-state">Loading...</div></div>
+          <button class="btn btn-danger" onclick="logout()" style="margin-top:1.5rem">Sign Out</button>
+        </div></div></div>
+      </section>
+
+      <!-- Settings -->
+      <section id="settings-view" class="view">
+        <div class="view-header"><div class="view-header-left"><h2>Settings</h2><span class="header-subtitle">Configuration &amp; integrations</span></div></div>
+        <div class="content-scroll padded" style="max-width:720px"><div id="settings-sections"></div><div id="settings-toast" class="toast"></div></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="invite-modal" class="modal-overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header"><h3>Invite Team Member</h3><button class="modal-close" onclick="hideInviteModal()">×</button></div>
+      <div class="modal-body">
+        <div class="form-group"><label>Email Address</label><input id="invite-email" type="email" placeholder="colleague@company.com" class="input" /></div>
+        <div class="form-group"><label>Role</label><select id="invite-role" class="input"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="hideInviteModal()">Cancel</button><button class="btn btn-primary" onclick="inviteMember()">Send Invite</button></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
