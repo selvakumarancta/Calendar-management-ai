@@ -84,6 +84,7 @@ function switchView(name) {
   if (name === "org-settings") loadOrgSettings();
   if (name === "settings") loadSettings();
   if (name === "email") loadEmailView();
+  if (name === "scheduling") loadSchedulingView();
 }
 
 // ── Quick Chat (from quick-action buttons) ─────────────────────
@@ -1065,6 +1066,310 @@ async function loadScanHistory() {
   } catch (e) {
     container.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
   }
+}
+
+// ── Scheduling View ──────────────────────────────────────────────
+
+let schedulingCurrentTab = "links";
+let createdLinks = [];
+
+async function loadSchedulingView() {
+  try { await loadGuides(); } catch (_) {}
+  try { await loadOnboardingStatus(); } catch (_) {}
+}
+
+function switchSchedulingTab(tab) {
+  schedulingCurrentTab = tab;
+  document.querySelectorAll("[data-stab]").forEach(t => {
+    t.classList.toggle("active", t.dataset.stab === tab);
+  });
+  const panels = {
+    links: "sched-links-panel", booking: "sched-booking-panel",
+    hook: "sched-hook-panel", guides: "sched-guides-panel",
+    onboarding: "sched-onboarding-panel",
+  };
+  Object.values(panels).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+  const active = panels[tab];
+  if (active) document.getElementById(active).style.display = "block";
+}
+
+// Scheduling Links
+async function createSchedulingLink() {
+  const type = document.getElementById("link-type-select").value;
+  const attendeeEmail = document.getElementById("link-attendee-email").value.trim();
+  const duration = parseInt(document.getElementById("link-duration").value);
+  if (!attendeeEmail) { showToast("Enter attendee email first", "error"); return; }
+  const btn = document.querySelector("#sched-links-panel .btn-primary");
+  btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const path = type === "availability"
+      ? "/api/v1/email/scheduling-links/availability"
+      : "/api/v1/email/scheduling-links/suggested";
+    const body = type === "availability"
+      ? { attendee_email: attendeeEmail, duration_minutes: duration, days_ahead: 7 }
+      : { attendee_email: attendeeEmail, duration_minutes: duration, suggested_windows: [] };
+    const res = await api("POST", path, body);
+    createdLinks.unshift({ url: res.url, mode: res.mode, attendee: attendeeEmail, duration, created_at: new Date().toISOString() });
+    renderSchedulingLinks();
+    document.getElementById("link-attendee-email").value = "";
+    showToast("Link created!");
+  } catch (e) { showToast("Failed: " + e.message, "error"); }
+  btn.disabled = false; btn.textContent = "+ Create Link";
+}
+
+function renderSchedulingLinks() {
+  const container = document.getElementById("sched-links-list");
+  if (!createdLinks.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔗</div>No scheduling links yet. Create one above.</div>';
+    return;
+  }
+  container.innerHTML = createdLinks.map((l, i) => `
+    <div class="link-card">
+      <div class="link-card-meta">
+        <span class="link-mode-badge">${l.mode === "availability" ? "📅 Availability" : "💡 Suggested"}</span>
+        <span class="link-duration">${l.duration} min · ${esc(l.attendee)}</span>
+        <span class="link-time">${fmtRelativeTime(l.created_at)}</span>
+      </div>
+      <div class="link-url-row">
+        <code class="link-url">${esc(l.url)}</code>
+        <button class="btn btn-ghost btn-sm" onclick="copyLinkUrl(${i})">\ud83d\udccb Copy</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function copyLinkUrl(idx) {
+  const url = createdLinks[idx]?.url;
+  if (!url) return;
+  navigator.clipboard.writeText(url)
+    .then(() => showToast("Link copied!"))
+    .catch(() => {
+      const ta = document.createElement("textarea");
+      ta.value = url; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); document.body.removeChild(ta);
+      showToast("Link copied!");
+    });
+}
+
+// Booking Page
+async function lookupBookingSlots() {
+  const url = document.getElementById("booking-url").value.trim();
+  const duration = parseInt(document.getElementById("booking-duration").value);
+  const daysAhead = parseInt(document.getElementById("booking-days").value);
+  const result = document.getElementById("booking-slots-result");
+  if (!url) { showToast("Enter a booking page URL", "error"); return; }
+  result.innerHTML = '<div class="empty-state">Fetching available slots…</div>';
+  try {
+    const slots = await api("POST", "/api/v1/email/booking-page/slots", {
+      url, duration_minutes: duration, days_ahead: daysAhead,
+    });
+    if (!slots.length) {
+      result.innerHTML = '<div class="empty-state">No available slots found in that window.</div>';
+      return;
+    }
+    result.innerHTML = `
+      <div class="booking-slots-header"><h4>${slots.length} available slot${slots.length !== 1 ? "s" : ""}</h4></div>
+      <div class="booking-slots-grid">
+        ${slots.map(s => {
+          const start = new Date(s.start || s.start_time || s);
+          const end = s.end ? new Date(s.end) : null;
+          const dateStr = start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+          const timeStr = start.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) +
+            (end ? " – " + end.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "");
+          return `<div class="booking-slot">${dateStr}<br><strong>${timeStr}</strong></div>`;
+        }).join("")}
+      </div>`;
+  } catch (e) { result.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+}
+
+// Message Hook
+async function submitMessageHook() {
+  const message = document.getElementById("hook-message").value.trim();
+  const sender = document.getElementById("hook-sender").value.trim();
+  const source = document.getElementById("hook-source").value;
+  const autoCreate = document.getElementById("hook-auto-create").checked;
+  const result = document.getElementById("hook-result");
+  if (!message) { showToast("Paste a message first", "error"); return; }
+  result.innerHTML = '<div class="empty-state">Analysing…</div>';
+  try {
+    const res = await api("POST", "/api/v1/email/hook/message", {
+      message, sender: sender || "unknown", source, auto_create: autoCreate,
+    });
+    renderHookResult(res, result);
+  } catch (e) { result.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+}
+
+function renderHookResult(res, container) {
+  if (!res.extracted) {
+    container.innerHTML = '<div class="hook-result-card no-meeting"><div class="hook-result-icon">🤷</div>No scheduling commitment found in this message.</div>';
+    return;
+  }
+  const conf = Math.round((res.confidence || 0) * 100);
+  const confColor = conf >= 85 ? "var(--green)" : conf >= 60 ? "var(--orange)" : "var(--red)";
+  const dateStr = res.proposed_start ? new Date(res.proposed_start).toLocaleString() : "\u2014";
+  container.innerHTML = `
+    <div class="hook-result-card">
+      <div class="hook-result-header">
+        <span class="hook-confidence" style="color:${confColor}">${conf}% confidence</span>
+        ${res.event_created ? '<span class="hook-badge event-created">\u2705 Event Created</span>' : ""}
+      </div>
+      <div class="hook-result-grid">
+        ${res.title ? `<div class="hook-row"><span>Title</span><strong>${esc(res.title)}</strong></div>` : ""}
+        ${res.proposed_start ? `<div class="hook-row"><span>When</span><strong>${dateStr}</strong></div>` : ""}
+        ${res.duration_minutes ? `<div class="hook-row"><span>Duration</span><strong>${res.duration_minutes} min</strong></div>` : ""}
+        ${res.location ? `<div class="hook-row"><span>Location</span><strong>${esc(res.location)}</strong></div>` : ""}
+        ${res.attendees && res.attendees.length ? `<div class="hook-row"><span>Attendees</span><strong>${res.attendees.map(a => esc(a)).join(", ")}</strong></div>` : ""}
+      </div>
+      ${!res.event_created ? `<div class="hook-result-actions"><button class="btn btn-primary btn-sm" onclick="hookAutoCreate()">\ud83d\udcc5 Create Event</button></div>` : ""}
+    </div>`;
+  window._lastHookResult = res;
+}
+
+async function hookAutoCreate() {
+  const message = document.getElementById("hook-message").value.trim();
+  const sender = document.getElementById("hook-sender").value.trim();
+  const source = document.getElementById("hook-source").value;
+  const result = document.getElementById("hook-result");
+  try {
+    const res = await api("POST", "/api/v1/email/hook/message", {
+      message, sender: sender || "unknown", source, auto_create: true,
+    });
+    renderHookResult(res, result);
+    if (res.event_created) showToast("Event created!");
+  } catch (e) { showToast("Failed: " + e.message, "error"); }
+}
+
+// Guides
+async function loadGuides() {
+  const container = document.getElementById("guides-content");
+  if (!container) return;
+  try {
+    const guides = await api("GET", "/api/v1/email/guides");
+    renderGuides(guides, container);
+  } catch (e) {
+    if (container) container.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
+  }
+}
+
+function renderGuides(guides, container) {
+  const prefs = guides.scheduling_preferences || {};
+  const style = guides.style_guide || {};
+  container.innerHTML = `
+    <div class="guide-section">
+      <div class="guide-section-header">
+        <h4>\ud83d\udcc6 Scheduling Preferences</h4>
+        <button class="btn btn-ghost btn-sm" onclick="saveSchedulingPrefs()">Save</button>
+      </div>
+      <div class="form-row wrap-row">
+        <div class="form-group flex-1"><label>Start Time</label><input id="prefs-hours-start" type="time" class="input input-sm" value="${esc(prefs.working_hours_start || "09:00")}" /></div>
+        <div class="form-group flex-1"><label>End Time</label><input id="prefs-hours-end" type="time" class="input input-sm" value="${esc(prefs.working_hours_end || "17:00")}" /></div>
+        <div class="form-group flex-1"><label>Default Duration (min)</label><input id="prefs-duration" type="number" class="input input-sm" min="15" max="480" value="${prefs.meeting_duration_minutes || 30}" /></div>
+        <div class="form-group flex-1"><label>Buffer (min)</label><input id="prefs-buffer" type="number" class="input input-sm" min="0" max="60" value="${prefs.buffer_minutes || 15}" /></div>
+      </div>
+    </div>
+    <div class="guide-section" style="margin-top:1rem">
+      <div class="guide-section-header">
+        <h4>\u270d\ufe0f Email Style Guide</h4>
+        <button class="btn btn-ghost btn-sm" onclick="saveStyleGuide()">Save</button>
+      </div>
+      <div class="form-group">
+        <label>Tone</label>
+        <select id="style-tone" class="select-minimal">
+          ${["professional", "friendly", "formal", "casual"].map(t =>
+            `<option value="${t}" ${(style.tone || "professional") === t ? "selected" : ""}>${t}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label>Signature</label><textarea id="style-signature" class="input textarea" rows="3">${esc(style.signature || "")}</textarea></div>
+      <div class="form-group"><label>Custom AI Instructions</label><textarea id="style-instructions" class="input textarea" rows="3" placeholder="e.g. Always include a Zoom link; avoid bullet points">${esc(style.custom_instructions || "")}</textarea></div>
+    </div>`;
+}
+
+async function saveSchedulingPrefs() {
+  try {
+    await api("PUT", "/api/v1/email/guides/preferences", {
+      working_hours_start: document.getElementById("prefs-hours-start").value,
+      working_hours_end: document.getElementById("prefs-hours-end").value,
+      meeting_duration_minutes: parseInt(document.getElementById("prefs-duration").value),
+      buffer_minutes: parseInt(document.getElementById("prefs-buffer").value),
+    });
+    showToast("Scheduling preferences saved!");
+  } catch (e) { showToast("Failed: " + e.message, "error"); }
+}
+
+async function saveStyleGuide() {
+  try {
+    await api("PUT", "/api/v1/email/guides/style", {
+      tone: document.getElementById("style-tone").value,
+      signature: document.getElementById("style-signature").value,
+      custom_instructions: document.getElementById("style-instructions").value,
+    });
+    showToast("Style guide saved!");
+  } catch (e) { showToast("Failed: " + e.message, "error"); }
+}
+
+// Onboarding
+async function startOnboarding() {
+  const btn = document.getElementById("btn-start-onboarding");
+  if (btn) { btn.disabled = true; btn.textContent = "Starting…"; }
+  try {
+    const res = await api("POST", "/api/v1/email/onboarding/start");
+    showToast(res.message || "Onboarding started!");
+    setTimeout(loadOnboardingStatus, 2000);
+  } catch (e) {
+    showToast("Failed: " + e.message, "error");
+    if (btn) { btn.disabled = false; btn.textContent = "Start Onboarding"; }
+  }
+}
+
+async function loadOnboardingStatus() {
+  const container = document.getElementById("onboarding-content");
+  if (!container) return;
+  try {
+    const status = await api("GET", "/api/v1/email/onboarding/status");
+    renderOnboardingStatus(status, container);
+  } catch (e) {
+    container.innerHTML = renderOnboardingDefault();
+  }
+}
+
+function renderOnboardingStatus(status, container) {
+  const steps = status.steps || [];
+  const completed = status.completed_steps || 0;
+  const total = status.total_steps || steps.length || 0;
+  const pct = total ? Math.round((completed / total) * 100) : 0;
+  container.innerHTML = `
+    <div class="onboarding-card">
+      <div class="onboarding-header">
+        <h4>Setup Progress</h4>
+        <span class="onboarding-pct">${pct}% complete</span>
+      </div>
+      <div class="onboarding-progress"><div class="onboarding-bar" style="width:${pct}%"></div></div>
+      ${steps.length ? `
+      <div class="onboarding-steps">
+        ${steps.map(s => `
+          <div class="onboarding-step ${s.completed ? "done" : ""}">
+            <span class="step-icon">${s.completed ? "\u2705" : "\u2b1c"}</span>
+            <div class="step-info">
+              <div class="step-title">${esc(s.title || s.name || String(s))}</div>
+              ${s.description ? `<div class="step-desc">${esc(s.description)}</div>` : ""}
+            </div>
+          </div>`).join("")}
+      </div>` : ""}
+      ${pct < 100 ? `<button class="btn btn-primary" id="btn-start-onboarding" onclick="startOnboarding()" style="margin-top:1rem">Start Onboarding</button>` : '<p class="text-muted" style="margin-top:.75rem">\u2705 All steps complete!</p>'}
+    </div>`;
+}
+
+function renderOnboardingDefault() {
+  return `
+    <div class="onboarding-card">
+      <div class="onboarding-header"><h4>Get Started with Chronos</h4></div>
+      <p class="text-muted" style="margin-bottom:1rem">Run the onboarding flow to set up scheduling preferences, email style guide, and connected accounts in one guided step.</p>
+      <button class="btn btn-primary" id="btn-start-onboarding" onclick="startOnboarding()">Start Onboarding</button>
+    </div>`;
 }
 
 // ── User Preferences / Autopilot ─────────────────────────────

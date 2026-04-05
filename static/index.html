@@ -40,6 +40,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           <span>Email Intel</span>
         </button>
+        <button class="nav-btn" data-view="scheduling">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>Scheduling</span>
+        </button>
         <div class="nav-divider"></div>
         <button class="nav-btn" data-view="org-settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -170,6 +174,88 @@
           <div id="email-suggestions" class="content-scroll" style="display:none"><div class="empty-state"><div class="empty-icon">💡</div>Suggestions appear after scanning</div></div>
           <div id="email-history" class="content-scroll" style="display:none"></div>
           <div id="email-analytics" class="content-scroll padded" style="display:none"></div>
+        </div>
+      </section>
+
+      <!-- Scheduling -->
+      <section id="scheduling-view" class="view">
+        <div class="email-container">
+          <div class="view-header">
+            <div class="view-header-left"><h2>Scheduling</h2><span class="header-subtitle">Links · Guides · Onboarding</span></div>
+          </div>
+          <div class="tab-bar">
+            <button class="tab active" data-stab="links" onclick="switchSchedulingTab('links')">Scheduling Links</button>
+            <button class="tab" data-stab="booking" onclick="switchSchedulingTab('booking')">Booking Page</button>
+            <button class="tab" data-stab="hook" onclick="switchSchedulingTab('hook')">Message Hook</button>
+            <button class="tab" data-stab="guides" onclick="switchSchedulingTab('guides')">Guides</button>
+            <button class="tab" data-stab="onboarding" onclick="switchSchedulingTab('onboarding')">Onboarding</button>
+          </div>
+          <!-- Links -->
+          <div id="sched-links-panel" class="content-scroll padded">
+            <div class="sched-links-toolbar">
+              <div class="form-row">
+                <select id="link-type-select" class="select-minimal">
+                  <option value="availability">Full Availability</option>
+                  <option value="suggested">Suggested Windows</option>
+                </select>
+                <input id="link-attendee-email" type="email" class="input input-sm" placeholder="attendee@email.com" style="max-width:220px" />
+                <select id="link-duration" class="select-minimal">
+                  <option value="15">15 min</option>
+                  <option value="30" selected>30 min</option>
+                  <option value="45">45 min</option>
+                  <option value="60">1 hour</option>
+                  <option value="90">1.5 hours</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="createSchedulingLink()">+ Create Link</button>
+              </div>
+            </div>
+            <div id="sched-links-list"><div class="empty-state"><div class="empty-icon">🔗</div>No scheduling links yet. Create one above.</div></div>
+          </div>
+          <!-- Booking Page -->
+          <div id="sched-booking-panel" class="content-scroll padded" style="display:none">
+            <div class="sched-form-card">
+              <h4>Look Up Available Slots</h4>
+              <p class="text-muted">Paste a Calendly or Cal.com booking page URL to see available times.</p>
+              <div class="form-group"><label>Booking Page URL</label><input id="booking-url" type="url" class="input" placeholder="https://calendly.com/username/30min" /></div>
+              <div class="form-row" style="margin-bottom:.75rem">
+                <div class="form-group flex-1"><label>Duration</label>
+                  <select id="booking-duration" class="select-minimal"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">1 hour</option></select>
+                </div>
+                <div class="form-group flex-1"><label>Days Ahead</label>
+                  <select id="booking-days" class="select-minimal"><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select>
+                </div>
+              </div>
+              <button class="btn btn-primary" onclick="lookupBookingSlots()">Fetch Slots</button>
+            </div>
+            <div id="booking-slots-result"></div>
+          </div>
+          <!-- Message Hook -->
+          <div id="sched-hook-panel" class="content-scroll padded" style="display:none">
+            <div class="sched-form-card">
+              <h4>Extract Meeting from Message</h4>
+              <p class="text-muted">Paste a Slack, SMS, or any text message to extract scheduling commitments.</p>
+              <div class="form-group"><label>Message</label><textarea id="hook-message" class="input textarea" rows="4" placeholder="e.g. Hey, let's catch up Thursday at 3pm for 30 mins!"></textarea></div>
+              <div class="form-row" style="margin-bottom:.75rem">
+                <div class="form-group flex-1"><label>Sender</label><input id="hook-sender" type="text" class="input input-sm" placeholder="Alice / alice@co.com" /></div>
+                <div class="form-group flex-1"><label>Source</label>
+                  <select id="hook-source" class="select-minimal"><option value="slack">Slack</option><option value="sms">SMS</option><option value="email">Email</option><option value="text">Other</option></select>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:.75rem">
+                <label class="checkbox-label"><input type="checkbox" id="hook-auto-create" /><span>Auto-create calendar event if confidence &gt; 85%</span></label>
+              </div>
+              <button class="btn btn-primary" onclick="submitMessageHook()">Analyse &amp; Extract</button>
+            </div>
+            <div id="hook-result"></div>
+          </div>
+          <!-- Guides -->
+          <div id="sched-guides-panel" class="content-scroll padded" style="display:none">
+            <div id="guides-content"><div class="empty-state">Loading guides…</div></div>
+          </div>
+          <!-- Onboarding -->
+          <div id="sched-onboarding-panel" class="content-scroll padded" style="display:none">
+            <div id="onboarding-content"></div>
+          </div>
         </div>
       </section>
 

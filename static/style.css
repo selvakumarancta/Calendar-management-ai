@@ -892,6 +892,82 @@ html,body {
 ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
 
+/* ── Scheduling View ── */
+.sched-links-toolbar { margin-bottom: 1rem; }
+.sched-form-card {
+  background: var(--surface1); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem;
+  max-width: 560px; margin-bottom: 1.5rem;
+}
+.sched-form-card h4 { margin: 0 0 .25rem; font-size: .95rem; }
+.sched-form-card p.text-muted { margin: 0 0 1rem; font-size: .82rem; }
+
+/* Form layout helpers */
+.form-row { display: flex; align-items: flex-end; gap: .6rem; flex-wrap: wrap; }
+.form-group { display: flex; flex-direction: column; gap: .3rem; }
+.form-group label { font-size: .78rem; color: var(--text2); font-weight: 500; }
+.flex-1 { flex: 1; min-width: 120px; }
+.wrap-row { flex-wrap: wrap; }
+.textarea { resize: vertical; min-height: 72px; font-family: inherit; }
+.input-sm { padding: .35rem .6rem !important; font-size: .85rem !important; }
+.checkbox-label { display: flex; align-items: center; gap: .5rem; font-size: .85rem; cursor: pointer; }
+.checkbox-label input { width: 15px; height: 15px; accent-color: var(--accent); }
+
+/* Scheduling link cards */
+.link-card {
+  background: var(--surface1); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .85rem 1rem; margin-bottom: .6rem;
+}
+.link-card-meta { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .45rem; }
+.link-mode-badge { font-size: .75rem; font-weight: 600; }
+.link-duration { font-size: .78rem; color: var(--text2); }
+.link-time { font-size: .72rem; color: var(--text3); margin-left: auto; }
+.link-url-row { display: flex; align-items: center; gap: .5rem; background: var(--surface2); border-radius: 6px; padding: .35rem .6rem; }
+.link-url { font-family: monospace; font-size: .75rem; color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Booking slots */
+.booking-slots-header h4 { font-size: .9rem; margin: 0 0 .75rem; }
+.booking-slots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .5rem; margin-top: .5rem; }
+.booking-slot {
+  background: var(--surface1); border: 1px solid var(--border);
+  border-radius: 8px; padding: .65rem .75rem; font-size: .78rem; text-align: center; line-height: 1.6;
+}
+
+/* Message hook result */
+.hook-result-card {
+  background: var(--surface1); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1rem 1.25rem; margin-top: .75rem;
+}
+.hook-result-card.no-meeting { text-align: center; color: var(--text2); padding: 1.5rem; }
+.hook-result-icon { font-size: 1.5rem; margin-bottom: .5rem; }
+.hook-result-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.hook-confidence { font-size: .85rem; font-weight: 600; }
+.hook-badge { font-size: .75rem; border-radius: 10px; padding: .15rem .55rem; background: var(--surface2); }
+.hook-badge.event-created { background: #d4edda; color: #155724; }
+.hook-result-grid { display: flex; flex-direction: column; gap: .45rem; margin-bottom: .75rem; }
+.hook-row { display: flex; gap: .75rem; font-size: .83rem; }
+.hook-row span:first-child { color: var(--text2); min-width: 70px; }
+.hook-result-actions { margin-top: .5rem; }
+
+/* Guides */
+.guide-section { background: var(--surface1); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.25rem; }
+.guide-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.guide-section-header h4 { margin: 0; font-size: .92rem; }
+
+/* Onboarding */
+.onboarding-card { background: var(--surface1); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; max-width: 520px; }
+.onboarding-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
+.onboarding-header h4 { margin: 0; font-size: .95rem; }
+.onboarding-pct { font-size: .82rem; color: var(--accent); font-weight: 600; }
+.onboarding-progress { height: 6px; background: var(--surface2); border-radius: 3px; margin-bottom: 1rem; overflow: hidden; }
+.onboarding-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
+.onboarding-steps { display: flex; flex-direction: column; gap: .6rem; }
+.onboarding-step { display: flex; align-items: flex-start; gap: .65rem; padding: .5rem .6rem; border-radius: 6px; background: var(--surface2); }
+.onboarding-step.done { background: transparent; border: 1px solid var(--border); }
+.step-icon { font-size: .9rem; flex-shrink: 0; margin-top: .05rem; }
+.step-title { font-size: .85rem; font-weight: 500; }
+.step-desc { font-size: .75rem; color: var(--text2); margin-top: .1rem; }
+
 /* ── Autopilot Toggle ── */
 .autopilot-toggle {
   display: inline-flex; align-items: center; gap: .4rem;
