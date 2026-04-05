@@ -43,11 +43,13 @@ class SchedulingLinkService:
         db_session_factory: Any = None,
         base_url: str = "https://app.example.com",
         link_expiry_days: int = 7,
+        analytics_service: Any = None,
     ) -> None:
         self._calendar = calendar_adapter
         self._db = db_session_factory
         self._base_url = base_url.rstrip("/")
         self._expiry_days = link_expiry_days
+        self._analytics = analytics_service
 
     async def create_suggested_link(
         self,
@@ -228,6 +230,13 @@ class SchedulingLinkService:
                     link_id, dto.title, chosen_dt, attendee_email,
                 )
                 await self._mark_link_used(link_id)
+                if self._analytics:
+                    await self._analytics.record(
+                        user_id=user_id,
+                        event_type="link_booked",
+                        link_id=link_id,
+                        extra={"attendee": attendee_email, "title": dto.title},
+                    )
                 return {
                     "success": True,
                     "event_id": getattr(event, "id", ""),

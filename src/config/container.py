@@ -229,6 +229,17 @@ class Container:
             )
         return self._instances["email_classifier"]
 
+    def analytics_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init analytics service."""
+        if "analytics_service" not in self._instances:
+            from src.application.services.analytics_service import AnalyticsService
+
+            db = self.database()
+            self._instances["analytics_service"] = AnalyticsService(
+                db_session_factory=db.session_factory,
+            )
+        return self._instances["analytics_service"]
+
     def draft_composer(self):  # type: ignore[no-untyped-def]
         """Lazy-init draft composer service."""
         if "draft_composer" not in self._instances:
@@ -241,6 +252,7 @@ class Container:
                 llm_adapter=self.llm_adapter(),
                 calendar_adapter=self.calendar_adapter(),
                 db_session_factory=db.session_factory,
+                analytics_service=self.analytics_service(),
                 user_timezone=self._settings.agent_default_timezone,
                 working_hours_start=self._settings.agent_working_hours_start,
                 working_hours_end=self._settings.agent_working_hours_end,
@@ -286,6 +298,7 @@ class Container:
                 db_session_factory=db.session_factory,
                 base_url=self._settings.app_base_url,
                 link_expiry_days=self._settings.scheduling_link_expiry_days,
+                analytics_service=self.analytics_service(),
             )
         return self._instances["scheduling_link_service"]
 
@@ -304,6 +317,17 @@ class Container:
                 auto_create_threshold=self._settings.autopilot_confidence_threshold,
             )
         return self._instances["message_hook_service"]
+
+    def booking_page_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init booking page service (Calendly / Cal.com slot reading)."""
+        if "booking_page_service" not in self._instances:
+            from src.application.services.booking_page_service import BookingPageService
+
+            self._instances["booking_page_service"] = BookingPageService(
+                calendly_api_key=getattr(self._settings, "calendly_api_key", ""),
+                calcom_api_key=getattr(self._settings, "calcom_api_key", ""),
+            )
+        return self._instances["booking_page_service"]
 
     def invite_verification_service(self):  # type: ignore[no-untyped-def]
         """Lazy-init invite verification service."""

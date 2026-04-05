@@ -902,3 +902,120 @@ async def message_hook(
         auto_create=request.auto_create,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Analytics Routes
+# ---------------------------------------------------------------------------
+
+
+@email_router.get("/analytics/summary")
+async def get_analytics_summary(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Get analytics summary for the current user's scheduling activity.
+
+    Returns counts and rates for drafts, invites, and booking links
+    over the last N days.
+    """
+    from src.application.services.analytics_service import AnalyticsService
+
+    service = AnalyticsService(db_session_factory=container.database().session_factory)
+    return await service.get_summary(current_user.id, days=days)
+
+
+@email_router.get("/analytics/events")
+async def get_analytics_events(
+    limit: int = 50,
+    event_type: str | None = None,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> list[dict]:
+    """
+    Get individual analytics events for the activity feed.
+
+    Filter by event_type: draft_composed | draft_sent | draft_sent_autopilot |
+    draft_discarded | invite_verified | invite_skipped | link_created |
+    link_booked | scan_completed | onboarding_completed
+    """
+    from src.application.services.analytics_service import AnalyticsService
+
+    service = AnalyticsService(db_session_factory=container.database().session_factory)
+    return await service.get_recent_events(
+        current_user.id, limit=limit, event_type=event_type
+    )
+
+
+# ---------------------------------------------------------------------------
+# Booking Page Routes (Calendly / Cal.com slot reading)
+# ---------------------------------------------------------------------------
+
+
+class BookingPageSlotsRequest(BaseModel):
+    url: str = Field(..., description="Calendly or Cal.com booking page URL")
+    duration_minutes: int = Field(default=30, ge=15, le=480)
+    days_ahead: int = Field(default=7, ge=1, le=30)
+    timezone: str = Field(default="UTC", description="IANA timezone name")
+
+
+class BookingPageBookRequest(BaseModel):
+    url: str = Field(..., description="Calendly or Cal.com booking page URL")
+    start_time: str = Field(..., description="ISO8601 slot start time to book")
+    attendee_name: str
+    attendee_email: str
+    notes: str = ""
+
+
+@email_router.post("/booking-page/slots")
+async def get_booking_page_slots(
+    request: BookingPageSlotsRequest,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> list[dict]:
+    """
+    Fetch available time slots from a Calendly or Cal.com booking page.
+
+    Uses the platform API when configured, falls back to page scraping.
+    Returns slots that can be embedded directly in scheduling links or drafts.
+    """
+    from src.application.services.booking_page_service import BookingPageService
+
+    service = container.booking_page_service()
+    slots = await service.get_available_slots(
+        url=request.url,
+        duration_minutes=request.duration_minutes,
+        days_ahead=request.days_ahead,
+        timezone_str=request.timezone,
+    )
+    return slots
+
+
+@email_router.post("/booking-page/book")
+async def book_booking_page_slot(
+    request: BookingPageBookRequest,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Book a specific slot on a Calendly or Cal.com page.
+
+    Cal.com: books via the v2 Bookings API.
+    Calendly: returns a booking URL (automated booking not supported by Calendly's API).
+    """
+    from src.application.services.booking_page_service import BookingPageService
+
+    service = container.booking_page_service()
+    result = await service.book_slot(
+        url=request.url,
+        start_time=request.start_time,
+        attendee_name=request.attendee_name,
+        attendee_email=request.attendee_email,
+        notes=request.notes,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("reason", "Booking failed"))
+    return result
+

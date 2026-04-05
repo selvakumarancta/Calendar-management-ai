@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # --- Autopilot ---
     autopilot_confidence_threshold: float = 0.85
 
+    # --- 3rd-party Booking Pages ---
+    calendly_api_key: str = ""
+    calcom_api_key: str = ""
+
     # --- Stripe ---
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

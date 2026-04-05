@@ -133,10 +133,18 @@ class DraftComposerService:
         llm_adapter: Any = None,
         calendar_adapter: Any = None,
         db_session_factory: Any = None,
+        analytics_service: Any = None,
+        user_timezone: str = "UTC",
+        working_hours_start: str = "09:00",
+        working_hours_end: str = "17:00",
     ) -> None:
         self._llm = llm_adapter
         self._calendar = calendar_adapter
         self._db = db_session_factory
+        self._analytics = analytics_service
+        self._user_timezone = user_timezone
+        self._working_hours_start = working_hours_start
+        self._working_hours_end = working_hours_end
 
     async def compose_and_create_draft(
         self,
@@ -275,6 +283,23 @@ class DraftComposerService:
 
         # 7. Persist the draft
         await self._save_draft(draft)
+
+        # 8. Record analytics
+        if self._analytics:
+            event = (
+                "draft_sent_autopilot"
+                if draft_status == DraftStatus.AUTOPILOT_SENT
+                else "draft_composed"
+            )
+            await self._analytics.record(
+                user_id=user_id,
+                event_type=event,
+                draft_id=draft.id,
+                thread_id=email.thread_id,
+                confidence=classification.confidence,
+                was_autopilot=draft_status == DraftStatus.AUTOPILOT_SENT,
+                extra={"subject": email.subject, "is_group": is_group},
+            )
 
         logger.info(
             "Draft created for user %s: '%s' → Gmail draft %s (autopilot=%s)",

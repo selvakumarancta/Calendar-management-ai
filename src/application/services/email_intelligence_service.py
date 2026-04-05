@@ -237,12 +237,6 @@ Return ONLY a JSON object:
 
 Be conservative: if ambiguous, choose skip. Never send an unwanted invite.
 """
-    re.compile(r"\bcalendar\s+(?:event|invite|notification)", re.I),
-    re.compile(r"\b(?:accepted|declined|tentative):\s+", re.I),  # RSVP replies
-    re.compile(r"(?:meeting|event|call)\s+(?:reminder|update|changed)", re.I),
-    re.compile(r"\bconference\b|\bwebinar\b|\bdemo\b|\binterview\b", re.I),
-    re.compile(r"(?:appointment|booking)\s+(?:confirmation|reminder)", re.I),
-]
 
 _CANCEL_PATTERNS = [
     re.compile(
@@ -389,7 +383,6 @@ class EmailIntelligenceService:
                         from src.application.services.email_classifier_service import (
                             ClassificationRequest,
                         )
-                        from src.domain.entities.email_message import ClassificationIntent
 
                         clf_request = ClassificationRequest(
                             email=email,
@@ -413,26 +406,19 @@ class EmailIntelligenceService:
                             )
                             continue
 
-                        # Skip emails that don't need a draft
-                        if clf_response.intent == ClassificationIntent.IGNORE:
-                            logger.debug("Ignoring email: '%s'", email.subject)
-                            continue
-
-                        if (
-                            clf_response.intent == ClassificationIntent.NEEDS_DRAFT
-                            and self._draft_composer
-                        ):
+                        if clf_response.needs_draft and self._draft_composer:
                             result.actionable_found += 1
                             try:
-                                from src.application.services.user_guides_service import UserSchedulingGuide, UserStyleGuide
-                                draft = await self._draft_composer.compose_draft(
-                                    user_id=user_id,
+                                draft = await self._draft_composer.compose_and_create_draft(
                                     email=email,
                                     classification=clf_response,
+                                    user_id=user_id,
+                                    user_email=user_email,
+                                    user_timezone=user_timezone,
                                     email_provider=email_provider,
-                                    user_guide=scheduling_guide or None,
-                                    style_guide=style_guide or None,
-                                    autopilot=autopilot,
+                                    email_style_guide=style_guide,
+                                    scheduling_preferences_guide=scheduling_guide,
+                                    autopilot_enabled=autopilot,
                                 )
                                 if draft:
                                     result.suggestions_created += 1
@@ -459,8 +445,8 @@ class EmailIntelligenceService:
                             )
                             continue
 
-                        # DOESNT_NEED_DRAFT path: fall through to legacy analysis
-                        # (legacy path handles calendar invites, reminders, etc.)
+                        # needs_draft=False: fall through to legacy analysis
+                        # (handles calendar invites, reminders, etc.)
 
                     # ---- Legacy analysis path (regex + LLM) ----
                     analysis = await self.analyze_email(email)

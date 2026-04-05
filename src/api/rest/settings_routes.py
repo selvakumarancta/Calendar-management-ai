@@ -466,3 +466,149 @@ def _hot_reload_settings(
 
     for inst_key in _invalidate_instances:
         container._instances.pop(inst_key, None)
+
+
+# ---------------------------------------------------------------------------
+# User Preferences Routes (autopilot, scheduling calendar, draft toggle)
+# ---------------------------------------------------------------------------
+
+
+class UserPreferencesResponse(BaseModel):
+    autopilot_enabled: bool
+    email_draft_enabled: bool
+    scheduling_calendar_id: str | None
+    onboarding_completed: bool
+    scheduling_guide_generated: bool
+    style_guide_generated: bool
+
+
+class UserPreferencesUpdateRequest(BaseModel):
+    autopilot_enabled: bool | None = None
+    email_draft_enabled: bool | None = None
+
+
+@settings_router.get("/user-preferences", response_model=UserPreferencesResponse)
+async def get_user_preferences(
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Get the current user's agent preferences (autopilot, draft toggle, etc.)."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.models import UserModel
+
+    db = container.database()
+    async with db.session_factory() as session:
+        result = await session.execute(
+            select(UserModel).where(UserModel.id == current_user.id)
+        )
+        user_row = result.scalars().first()
+
+    if not user_row:
+        return {
+            "autopilot_enabled": False,
+            "email_draft_enabled": True,
+            "scheduling_calendar_id": None,
+            "onboarding_completed": False,
+            "scheduling_guide_generated": False,
+            "style_guide_generated": False,
+        }
+
+    return {
+        "autopilot_enabled": getattr(user_row, "autopilot_enabled", False),
+        "email_draft_enabled": getattr(user_row, "email_draft_enabled", True),
+        "scheduling_calendar_id": getattr(user_row, "scheduling_calendar_id", None),
+        "onboarding_completed": getattr(user_row, "onboarding_completed", False),
+        "scheduling_guide_generated": getattr(user_row, "scheduling_guide_generated", False),
+        "style_guide_generated": getattr(user_row, "style_guide_generated", False),
+    }
+
+
+@settings_router.put("/user-preferences", response_model=UserPreferencesResponse)
+async def update_user_preferences(
+    request: UserPreferencesUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Update agent preferences for the current user.
+
+    - autopilot_enabled: When True, 1:1 scheduling replies are sent automatically
+      without requiring manual review of drafts.
+    - email_draft_enabled: When False, the AI will not compose any email drafts
+      and will only create calendar suggestions.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.models import UserModel
+
+    db = container.database()
+    async with db.session_factory() as session:
+        result = await session.execute(
+            select(UserModel).where(UserModel.id == current_user.id)
+        )
+        user_row = result.scalars().first()
+
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if request.autopilot_enabled is not None:
+            user_row.autopilot_enabled = request.autopilot_enabled
+        if request.email_draft_enabled is not None:
+            user_row.email_draft_enabled = request.email_draft_enabled
+
+        await session.commit()
+
+    return {
+        "autopilot_enabled": user_row.autopilot_enabled,
+        "email_draft_enabled": user_row.email_draft_enabled,
+        "scheduling_calendar_id": user_row.scheduling_calendar_id,
+        "onboarding_completed": user_row.onboarding_completed,
+        "scheduling_guide_generated": user_row.scheduling_guide_generated,
+        "style_guide_generated": user_row.style_guide_generated,
+    }
+
+
+@settings_router.post("/user-preferences/setup-calendar")
+async def setup_scheduling_calendar(
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Create (or find) the dedicated 'CalendarAgent' Google Calendar for the user
+    and store its ID so all AI-scheduled events go there instead of the primary calendar.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.models import UserModel
+
+    cal_adapter = container.calendar_adapter()
+
+    if not hasattr(cal_adapter, "get_or_create_scheduling_calendar"):
+        raise HTTPException(
+            status_code=501, detail="Dedicated scheduling calendar not supported by current adapter"
+        )
+
+    cal_id = await cal_adapter.get_or_create_scheduling_calendar(
+        current_user.id, calendar_name="CalendarAgent"
+    )
+
+    # Persist to user row
+    db = container.database()
+    async with db.session_factory() as session:
+        result = await session.execute(
+            select(UserModel).where(UserModel.id == current_user.id)
+        )
+        user_row = result.scalars().first()
+        if user_row:
+            user_row.scheduling_calendar_id = cal_id
+            await session.commit()
+
+    return {
+        "scheduling_calendar_id": cal_id,
+        "message": (
+            "Scheduling calendar is ready. AI-scheduled events will be added here."
+            if cal_id != "primary"
+            else "Using primary calendar (Google OAuth not connected)."
+        ),
+    }

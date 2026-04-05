@@ -288,3 +288,77 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
 
     async def delete(self, event_id: uuid.UUID) -> bool:
         return await self._in_memory.delete(event_id)
+
+    # ---- Scheduling calendar helpers -----------------------------------
+
+    async def get_or_create_scheduling_calendar(
+        self,
+        user_id: UUID,
+        calendar_name: str = "CalendarAgent",
+    ) -> str:
+        """
+        Return the Google Calendar ID for the dedicated scheduling calendar.
+
+        If a calendar named ``calendar_name`` already exists it is reused.
+        Otherwise a new secondary calendar is created on behalf of the user.
+        Falls back to "primary" when no real Google tokens are available.
+        """
+        tokens = await self._get_google_tokens(user_id)
+        if not tokens:
+            return "primary"
+
+        try:
+            service = self._build_google_service(tokens)
+
+            # 1. Check if the calendar already exists
+            cal_list = service.calendarList().list().execute()
+            for entry in cal_list.get("items", []):
+                if entry.get("summary") == calendar_name:
+                    return entry["id"]
+
+            # 2. Create a new secondary calendar
+            new_cal = (
+                service.calendars()
+                .insert(body={"summary": calendar_name, "description": "Managed by CalendarAgent"})
+                .execute()
+            )
+            cal_id: str = new_cal["id"]
+            logger.info(
+                "Created dedicated scheduling calendar '%s' (id=%s) for user %s",
+                calendar_name,
+                cal_id,
+                user_id,
+            )
+            return cal_id
+
+        except Exception as e:
+            logger.warning(
+                "Could not get/create scheduling calendar for user %s: %s — using primary",
+                user_id,
+                e,
+            )
+            return "primary"
+
+    async def persist_scheduling_calendar_id(
+        self, user_id: UUID, calendar_id: str
+    ) -> None:
+        """Persists the scheduling_calendar_id to the user record in DB."""
+        if not self._db_session_factory:
+            return
+        try:
+            from sqlalchemy import select
+
+            from src.infrastructure.persistence.models import UserModel
+
+            async with self._db_session_factory() as session:
+                result = await session.execute(
+                    select(UserModel).where(UserModel.id == user_id)
+                )
+                user_row = result.scalars().first()
+                if user_row:
+                    user_row.scheduling_calendar_id = calendar_id
+                    await session.commit()
+        except Exception as e:
+            logger.warning(
+                "Could not persist scheduling_calendar_id for user %s: %s", user_id, e
+            )
