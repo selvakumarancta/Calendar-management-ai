@@ -145,6 +145,110 @@ class OutlookEmailAdapter(EmailProviderPort):
             logger.error("Outlook get_email failed: %s", e)
             return None
 
+    async def get_thread_messages(
+        self,
+        user_id: uuid.UUID,
+        thread_id: str,
+        user_email: str = "",
+    ) -> list:
+        """Fetch all messages in an Outlook conversation thread."""
+        from src.domain.entities.email_message import ThreadMessage
+
+        try:
+            import httpx
+
+            headers = await self._get_headers(user_id)
+            url = f"{self.GRAPH_BASE}/me/messages?$filter=conversationId eq '{thread_id}'&$orderby=receivedDateTime asc&$top=50"
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers)
+                if response.status_code != 200:
+                    return []
+                messages = response.json().get("value", [])
+
+            result = []
+            for msg in messages:
+                from_data = msg.get("from", {}).get("emailAddress", {})
+                sender_email = from_data.get("address", "")
+                body_text = msg.get("body", {}).get("content", "")
+                if msg.get("body", {}).get("contentType") == "html":
+                    import re
+                    body_text = re.sub(r"<[^>]+>", " ", body_text)
+                    body_text = re.sub(r"\s+", " ", body_text).strip()
+                received_at_str = msg.get("receivedDateTime", "")
+                try:
+                    received_at = datetime.fromisoformat(received_at_str.replace("Z", "+00:00"))
+                except Exception:
+                    received_at = datetime.now(timezone.utc)
+                result.append(ThreadMessage(
+                    message_id=msg.get("id", ""),
+                    sender_email=sender_email,
+                    body_text=body_text,
+                    received_at=received_at,
+                    is_from_user=(sender_email.lower() == user_email.lower()),
+                ))
+            return result
+        except Exception as e:
+            logger.error("Outlook get_thread_messages failed: %s", e)
+            return []
+
+    async def create_draft_reply(
+        self,
+        user_id: uuid.UUID,
+        thread_id: str,
+        to: str,
+        subject: str,
+        body: str,
+        cc: str = "",
+        content_type: str = "plain",
+    ) -> str:
+        """Create a draft reply in Outlook Drafts folder via Microsoft Graph."""
+        try:
+            import httpx
+
+            headers = await self._get_headers(user_id)
+            headers["Content-Type"] = "application/json"
+
+            payload: dict = {
+                "subject": subject,
+                "body": {
+                    "contentType": "HTML" if content_type == "html" else "Text",
+                    "content": body,
+                },
+                "toRecipients": [{"emailAddress": {"address": to}}],
+                "conversationId": thread_id,
+            }
+            if cc:
+                payload["ccRecipients"] = [{"emailAddress": {"address": addr.strip()}} for addr in cc.split(",") if addr.strip()]
+
+            url = f"{self.GRAPH_BASE}/me/messages"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                return response.json().get("id", "")
+        except Exception as e:
+            logger.error("Outlook create_draft_reply failed: %s", e)
+            return ""
+
+    async def send_draft(
+        self,
+        user_id: uuid.UUID,
+        draft_provider_id: str,
+    ) -> str:
+        """Send an existing Outlook draft immediately."""
+        try:
+            import httpx
+
+            headers = await self._get_headers(user_id)
+            url = f"{self.GRAPH_BASE}/me/messages/{draft_provider_id}/send"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers)
+                response.raise_for_status()
+            return draft_provider_id
+        except Exception as e:
+            logger.error("Outlook send_draft failed: %s", e)
+            return ""
+
     async def mark_processed(
         self,
         user_id: uuid.UUID,
