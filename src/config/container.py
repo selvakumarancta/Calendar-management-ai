@@ -194,6 +194,29 @@ class Container:
             self._instances["intent_router"] = IntentRouter()
         return self._instances["intent_router"]
 
+    def calendar_agent(self):  # type: ignore[no-untyped-def]
+        """Lazy-init LangGraph calendar agent."""
+        if "calendar_agent" not in self._instances:
+            from src.agent.graph import CalendarAgentGraph
+            from src.application.services.calendar_service import CalendarService
+
+            cal_adapter = self.calendar_adapter()
+            calendar_service = CalendarService(
+                calendar_provider=cal_adapter,
+                event_repository=cal_adapter,  # type: ignore[arg-type]
+                cache=self.cache(),
+            )
+            self._instances["calendar_agent"] = CalendarAgentGraph(
+                calendar_service=calendar_service,
+                llm_provider=self._settings.llm_provider,
+                llm_api_key=self._settings.active_api_key,
+                default_model=self._settings.active_model_fast,
+                max_iterations=self._settings.agent_max_iterations,
+                working_hours_start=self._settings.agent_working_hours_start,
+                working_hours_end=self._settings.agent_working_hours_end,
+            )
+        return self._instances["calendar_agent"]
+
     async def shutdown(self) -> None:
         """Clean up all resources."""
         db = self._instances.get("database")

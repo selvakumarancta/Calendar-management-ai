@@ -80,7 +80,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start background email scanner
     from src.infrastructure.workers.email_scanner import EmailScannerWorker
 
-    scanner = EmailScannerWorker(container, scan_interval_minutes=15)
+    scanner = EmailScannerWorker(
+        container,
+        scan_interval_minutes=settings.email_scan_interval_minutes,
+        scan_window_hours=settings.email_scan_window_hours,
+        initial_scan_hours=settings.email_scan_initial_hours,
+    )
     app.state.email_scanner = scanner
     await scanner.start()
 

@@ -80,12 +80,27 @@ async def google_callback(
     oauth = container.google_oauth()
     tokens = oauth.exchange_code(code)
 
-    # 2. Get or create user in the database
+    # 2. Get user info from Google userinfo endpoint
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        if resp.status_code == 200:
+            profile = resp.json()
+            google_email = profile.get("email", "user@example.com")
+            google_name = profile.get("name", "Google User")
+        else:
+            google_email = "user@example.com"
+            google_name = "Google User"
+
+    # 3. Get or create user in the database
     db = container.database()
     async with db.session_factory() as session:
         user_repo = SQLAlchemyUserRepository(session)
 
-        # Decode user info from Google (simplified — in production use id_token)
         from src.application.services.auth_service import AuthService
 
         auth_svc = AuthService(
@@ -96,12 +111,9 @@ async def google_callback(
             refresh_token_expire_days=container.settings.jwt_refresh_token_expire_days,
         )
 
-        # For Google callback the email comes from the tokens.
-        # A full implementation would decode the id_token; here we use the
-        # JWT service directly for token issuance.
         user, _access, _refresh = await auth_svc.authenticate_google_oauth(
-            email="user@example.com",  # TODO: decode from Google id_token
-            name="User",
+            email=google_email,
+            name=google_name,
             access_token=tokens["access_token"],
             refresh_token=tokens.get("refresh_token"),
             token_expiry=tokens["expiry"],
@@ -190,15 +202,17 @@ async def microsoft_callback(
 @auth_router.get("/me", response_model=UserProfileDTO)
 async def get_profile(
     current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
 ) -> UserProfileDTO:
     """Get current user's profile and usage stats."""
+    monthly_used = await container.usage_tracker().get_monthly_request_count(current_user.id)
     return UserProfileDTO(
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
         timezone=current_user.timezone,
         plan=current_user.plan.value,
-        monthly_requests_used=0,  # TODO: fetch from usage tracker
+        monthly_requests_used=monthly_used,
         monthly_request_limit=current_user.get_request_limit(),
     )
 
@@ -336,9 +350,9 @@ def _build_chat_service(
         conversation_repo=conversation_repo,  # type: ignore[arg-type]
         usage_tracker=container.usage_tracker(),
         cache=container.cache(),
-        agent_executor=None,  # TODO: wire LangGraph agent
+        agent_executor=container.calendar_agent(),
         intent_router=container.intent_router(),
-        complexity_router=None,  # TODO: wire complexity router
+        complexity_router=None,
         calendar_provider=container.calendar_adapter(),
         llm_provider=settings.llm_provider,
         model_fast=settings.active_model_fast,

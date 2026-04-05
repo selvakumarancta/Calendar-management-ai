@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     agent_buffer_minutes: int = 15
     agent_cache_ttl_seconds: int = 300
 
+    # --- Email Intelligence ---
+    email_scan_interval_minutes: int = 15
+    email_scan_window_hours: int = 72
+    email_scan_initial_hours: int = 72
+
     # --- Stripe ---
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

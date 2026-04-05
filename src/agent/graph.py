@@ -34,12 +34,16 @@ class CalendarAgentGraph:
         llm_api_key: str,
         default_model: str = "",
         max_iterations: int = 10,
+        working_hours_start: str = "09:00",
+        working_hours_end: str = "17:00",
     ) -> None:
         self._calendar_service = calendar_service
         self._llm_provider = llm_provider
         self._llm_api_key = llm_api_key
         self._default_model = default_model
         self._max_iterations = max_iterations
+        self._working_hours_start = working_hours_start
+        self._working_hours_end = working_hours_end
         self._tools = create_calendar_tools(calendar_service)
         self._graph = self._build_graph()
 
@@ -82,13 +86,15 @@ class CalendarAgentGraph:
         )
         llm = llm_base.bind_tools(self._tools)  # type: ignore[union-attr]
 
-        # Build system message with context
+        # Build system message with context — include user_id so LLM always passes it to tools
+        user_id = state.get("user_id", "")
         system_msg = SystemMessage(
             content=SYSTEM_PROMPT.format(
                 current_date=datetime.now(timezone.utc).strftime("%Y-%m-%d %A"),
                 user_timezone=state.get("user_timezone", "UTC"),
-                working_hours_start="09:00",
-                working_hours_end="17:00",
+                working_hours_start=self._working_hours_start,
+                working_hours_end=self._working_hours_end,
+                user_id=user_id,
             )
         )
 
@@ -128,7 +134,7 @@ class CalendarAgentGraph:
         """Execute the agent graph with a user message."""
         initial_state: AgentState = {
             "messages": [HumanMessage(content=message)],
-            "user_id": user_id,
+            "user_id": str(user_id),
             "user_timezone": user_timezone,
             "user_plan": user_plan,
             "model": model or self._default_model,

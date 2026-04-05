@@ -239,7 +239,7 @@ class ChatService:
         # Delegate to the injected agent executor
         if hasattr(self._agent_executor, "run"):
             return await self._agent_executor.run(  # type: ignore[union-attr]
-                user_id=user_id,
+                user_id=str(user_id),
                 message=message,
                 conversation=conversation,
                 model=model,
