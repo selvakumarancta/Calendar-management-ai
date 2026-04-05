@@ -1290,23 +1290,25 @@ function renderGuides(guides, container) {
 
 async function saveSchedulingPrefs() {
   try {
-    await api("PUT", "/api/v1/email/guides/preferences", {
-      working_hours_start: document.getElementById("prefs-hours-start").value,
-      working_hours_end: document.getElementById("prefs-hours-end").value,
-      meeting_duration_minutes: parseInt(document.getElementById("prefs-duration").value),
-      buffer_minutes: parseInt(document.getElementById("prefs-buffer").value),
-    });
+    const start    = document.getElementById("prefs-hours-start").value;
+    const end      = document.getElementById("prefs-hours-end").value;
+    const duration = document.getElementById("prefs-duration").value;
+    const buffer   = document.getElementById("prefs-buffer").value;
+    const content  = `· Working hours: ${start}–${end}\n· Default meeting duration: ${duration} minutes\n· Buffer between meetings: ${buffer} minutes`;
+    await api("PUT", "/api/v1/email/guides/preferences", { content });
     showToast("Scheduling preferences saved!");
   } catch (e) { showToast("Failed: " + e.message, "error"); }
 }
 
 async function saveStyleGuide() {
   try {
-    await api("PUT", "/api/v1/email/guides/style", {
-      tone: document.getElementById("style-tone").value,
-      signature: document.getElementById("style-signature").value,
-      custom_instructions: document.getElementById("style-instructions").value,
-    });
+    const tone         = document.getElementById("style-tone").value;
+    const signature    = document.getElementById("style-signature").value;
+    const instructions = document.getElementById("style-instructions").value;
+    const parts = [`· Tone: ${tone}`];
+    if (signature)    parts.push(`· Signature: ${signature}`);
+    if (instructions) parts.push(`· Instructions: ${instructions}`);
+    await api("PUT", "/api/v1/email/guides/style", { content: parts.join("\n") });
     showToast("Style guide saved!");
   } catch (e) { showToast("Failed: " + e.message, "error"); }
 }
