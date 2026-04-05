@@ -14,7 +14,12 @@ from src.domain.exceptions import AuthenticationError
 class GoogleOAuthService:
     """Manages Google OAuth2 authorization flow."""
 
-    SCOPES = ["https://www.googleapis.com/auth/calendar"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "openid",
+    ]
 
     def __init__(
         self,

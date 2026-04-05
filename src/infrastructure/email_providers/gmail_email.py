@@ -58,7 +58,7 @@ class GmailEmailAdapter(EmailProviderPort):
         return build("gmail", "v1", credentials=credentials)
 
     async def _get_user_tokens(self, user_id: uuid.UUID) -> dict | None:
-        """Look up Google OAuth tokens from provider_connections."""
+        """Look up Google OAuth tokens — checks provider_connections first, then users table."""
         if not self._db_session_factory:
             return None
 
@@ -67,6 +67,7 @@ class GmailEmailAdapter(EmailProviderPort):
         from src.infrastructure.persistence.org_models import ProviderConnectionModel
 
         async with self._db_session_factory() as session:
+            # 1. Try provider_connections (org-level or personal-sentinel connections)
             result = await session.execute(
                 select(ProviderConnectionModel).where(
                     ProviderConnectionModel.user_id == user_id,
@@ -82,6 +83,25 @@ class GmailEmailAdapter(EmailProviderPort):
                     "refresh_token": conn.refresh_token or "",
                     "provider_email": conn.provider_email or "",
                 }
+
+            # 2. Fall back to users table (main Google login stores tokens here)
+            from src.infrastructure.persistence.models import UserModel
+
+            result2 = await session.execute(
+                select(UserModel).where(UserModel.id == user_id)
+            )
+            user = result2.scalars().first()
+            if (
+                user
+                and user.google_access_token
+                and user.google_access_token not in ("dev-token", "")
+            ):
+                return {
+                    "access_token": user.google_access_token,
+                    "refresh_token": user.google_refresh_token or "",
+                    "provider_email": user.email or "",
+                }
+
         return None
 
     async def list_recent_emails(

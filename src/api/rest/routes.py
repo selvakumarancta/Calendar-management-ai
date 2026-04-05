@@ -72,32 +72,42 @@ async def google_callback(
     code: str,
     state: str | None = None,
     container: Container = Depends(get_container),
-) -> LoginResponseDTO:
-    """Handle Google OAuth2 callback — exchange code for tokens."""
+) -> object:
+    """Handle Google OAuth2 callback — exchange code for tokens, then redirect to app."""
+    import uuid as _uuid
+
+    import httpx
+    from fastapi.responses import HTMLResponse
+    from sqlalchemy import select
+
     from src.infrastructure.persistence.user_repository import SQLAlchemyUserRepository
+    from src.infrastructure.security.token_encryption import encrypt_token
 
     # 1. Exchange code for Google tokens
     oauth = container.google_oauth()
     tokens = oauth.exchange_code(code)
 
-    # 2. Get user info from Google userinfo endpoint
-    import httpx
+    raw_access = tokens["access_token"]
+    raw_refresh = tokens.get("refresh_token") or ""
 
+    # 2. Get user info from Google userinfo endpoint
+    google_email = "user@example.com"
+    google_name = "Google User"
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            headers={"Authorization": f"Bearer {raw_access}"},
         )
         if resp.status_code == 200:
             profile = resp.json()
-            google_email = profile.get("email", "user@example.com")
-            google_name = profile.get("name", "Google User")
-        else:
-            google_email = "user@example.com"
-            google_name = "Google User"
+            google_email = profile.get("email", google_email)
+            google_name = profile.get("name", google_name)
 
-    # 3. Get or create user in the database
+    # 3. Get or create user; store encrypted tokens in users table
     db = container.database()
+    enc_access = encrypt_token(raw_access)
+    enc_refresh = encrypt_token(raw_refresh)
+
     async with db.session_factory() as session:
         user_repo = SQLAlchemyUserRepository(session)
 
@@ -111,24 +121,74 @@ async def google_callback(
             refresh_token_expire_days=container.settings.jwt_refresh_token_expire_days,
         )
 
+        # Store encrypted tokens so GmailEmailAdapter can decrypt them later
         user, _access, _refresh = await auth_svc.authenticate_google_oauth(
             email=google_email,
             name=google_name,
-            access_token=tokens["access_token"],
-            refresh_token=tokens.get("refresh_token"),
+            access_token=enc_access,
+            refresh_token=enc_refresh or None,
             token_expiry=tokens["expiry"],
         )
 
-        jwt_svc = container.jwt_service()
-        access_token = jwt_svc.create_access_token(user)
-        refresh_token = jwt_svc.create_refresh_token(user)
+        # 4. Also upsert a stand-alone ProviderConnection (org_id = user's own UUID
+        #    used as a personal-account sentinel so GmailEmailAdapter finds tokens).
+        from src.infrastructure.persistence.org_models import ProviderConnectionModel
 
+        existing = await session.execute(
+            select(ProviderConnectionModel).where(
+                ProviderConnectionModel.user_id == user.id,
+                ProviderConnectionModel.provider == "google",
+                ProviderConnectionModel.org_id == user.id,  # personal sentinel
+            )
+        )
+        conn_model = existing.scalar_one_or_none()
+        if conn_model:
+            conn_model.access_token = enc_access
+            conn_model.refresh_token = enc_refresh
+            conn_model.token_expiry = tokens["expiry"]
+            conn_model.provider_email = google_email
+            conn_model.status = "active"
+        else:
+            conn_model = ProviderConnectionModel(
+                id=_uuid.uuid4(),
+                org_id=user.id,          # personal account sentinel
+                user_id=user.id,
+                provider="google",
+                provider_email=google_email,
+                status="active",
+                access_token=enc_access,
+                refresh_token=enc_refresh,
+                token_expiry=tokens["expiry"],
+                scopes=" ".join([
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                ]),
+            )
+            session.add(conn_model)
+
+        jwt_svc = container.jwt_service()
+        jwt_access = jwt_svc.create_access_token(user)
+        jwt_refresh = jwt_svc.create_refresh_token(user)
         await session.commit()
 
-    return LoginResponseDTO(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=container.settings.jwt_access_token_expire_minutes * 60,
+    # 5. Return an HTML page that stores the JWT in localStorage and redirects home
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
+<html>
+<head><title>Signing in...</title></head>
+<body style="background:#0f0f11;color:#e4e4eb;font-family:sans-serif;
+             display:flex;align-items:center;justify-content:center;height:100vh">
+  <div style="text-align:center">
+    <h2>&#x2705; Signed in as {google_name}</h2>
+    <p>Redirecting to Calendar Agent&hellip;</p>
+    <script>
+      localStorage.setItem('token', '{jwt_access}');
+      window.location.href = '/';
+    </script>
+    <p><a href="/" style="color:#8b5cf6">Click here if not redirected</a></p>
+  </div>
+</body>
+</html>"""
     )
 
 
@@ -147,55 +207,106 @@ async def microsoft_callback(
     code: str,
     state: str | None = None,
     container: Container = Depends(get_container),
-) -> LoginResponseDTO:
-    """Handle Microsoft OAuth2 callback — exchange code for tokens."""
+) -> object:
+    """Handle Microsoft OAuth2 callback — exchange code for tokens, then redirect to app."""
+    import uuid as _uuid
+
+    import httpx
+    from fastapi.responses import HTMLResponse
+    from sqlalchemy import select
+
     from src.infrastructure.persistence.user_repository import SQLAlchemyUserRepository
+    from src.infrastructure.security.token_encryption import encrypt_token
 
     oauth = container.microsoft_oauth()
     tokens = oauth.exchange_code(code)
 
-    # Get user info from Microsoft Graph
-    import httpx
+    raw_access = tokens["access_token"]
+    raw_refresh = tokens.get("refresh_token") or ""
 
+    # Get user info from Microsoft Graph
+    ms_email = "user@outlook.com"
+    ms_name = "Microsoft User"
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://graph.microsoft.com/v1.0/me",
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            headers={"Authorization": f"Bearer {raw_access}"},
         )
         if resp.status_code == 200:
             profile = resp.json()
-            email = profile.get("mail") or profile.get(
-                "userPrincipalName", "user@outlook.com"
-            )
-            name = profile.get("displayName", "Microsoft User")
-        else:
-            email = "user@outlook.com"
-            name = "Microsoft User"
+            ms_email = profile.get("mail") or profile.get("userPrincipalName", ms_email)
+            ms_name = profile.get("displayName", ms_name)
+
+    enc_access = encrypt_token(raw_access)
+    enc_refresh = encrypt_token(raw_refresh)
 
     db = container.database()
     async with db.session_factory() as session:
         user_repo = SQLAlchemyUserRepository(session)
-        user = await user_repo.get_by_email(email)
+        user = await user_repo.get_by_email(ms_email)
         if not user:
             from src.domain.entities.user import User as _User
 
-            user = _User(email=email, name=name)
+            user = _User(email=ms_email, name=ms_name)
             user = await user_repo.create(user)
 
-        # Store Microsoft tokens on user for calendar access
-        user.google_access_token = tokens["access_token"]  # reuse field
-        user.google_refresh_token = tokens.get("refresh_token")
+        # Store encrypted Microsoft tokens reusing the google_access_token fields
+        user.google_access_token = enc_access
+        user.google_refresh_token = enc_refresh or None
         await user_repo.update(user)
+
+        # Upsert a ProviderConnection so OutlookEmailAdapter can find tokens
+        from src.infrastructure.persistence.org_models import ProviderConnectionModel
+
+        existing = await session.execute(
+            select(ProviderConnectionModel).where(
+                ProviderConnectionModel.user_id == user.id,
+                ProviderConnectionModel.provider == "microsoft",
+                ProviderConnectionModel.org_id == user.id,
+            )
+        )
+        conn_model = existing.scalar_one_or_none()
+        if conn_model:
+            conn_model.access_token = enc_access
+            conn_model.refresh_token = enc_refresh
+            conn_model.provider_email = ms_email
+            conn_model.status = "active"
+        else:
+            conn_model = ProviderConnectionModel(
+                id=_uuid.uuid4(),
+                org_id=user.id,
+                user_id=user.id,
+                provider="microsoft",
+                provider_email=ms_email,
+                status="active",
+                access_token=enc_access,
+                refresh_token=enc_refresh,
+                scopes="Mail.Read Calendars.ReadWrite",
+            )
+            session.add(conn_model)
+
+        jwt_svc = container.jwt_service()
+        jwt_access = jwt_svc.create_access_token(user)
+        jwt_refresh = jwt_svc.create_refresh_token(user)
         await session.commit()
 
-    jwt_svc = container.jwt_service()
-    access_token = jwt_svc.create_access_token(user)
-    refresh_token = jwt_svc.create_refresh_token(user)
-
-    return LoginResponseDTO(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=container.settings.jwt_access_token_expire_minutes * 60,
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
+<html>
+<head><title>Signing in...</title></head>
+<body style="background:#0f0f11;color:#e4e4eb;font-family:sans-serif;
+             display:flex;align-items:center;justify-content:center;height:100vh">
+  <div style="text-align:center">
+    <h2>&#x2705; Signed in as {ms_name}</h2>
+    <p>Redirecting to Calendar Agent&hellip;</p>
+    <script>
+      localStorage.setItem('token', '{jwt_access}');
+      window.location.href = '/';
+    </script>
+    <p><a href="/" style="color:#8b5cf6">Click here if not redirected</a></p>
+  </div>
+</body>
+</html>"""
     )
 
 
