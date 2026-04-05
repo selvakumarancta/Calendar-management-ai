@@ -6,11 +6,11 @@ All external HTTP calls are mocked so these tests run offline.
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.application.services.booking_page_service import BookingPageService
+import pytest
 
+from src.application.services.booking_page_service import BookingPageService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -124,7 +124,9 @@ class TestBookingPageServiceSlots:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=httpx.RequestError("connection refused"))
+            mock_client.get = AsyncMock(
+                side_effect=httpx.RequestError("connection refused")
+            )
             mock_client_cls.return_value = mock_client
 
             slots = await service.get_available_slots(

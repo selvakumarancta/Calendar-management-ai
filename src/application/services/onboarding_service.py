@@ -68,7 +68,11 @@ class OnboardingService:
         Returns:
             Result dict with counts and status.
         """
-        logger.info("Starting onboarding for user %s (lookback=%d days)", user_id, self._lookback_days)
+        logger.info(
+            "Starting onboarding for user %s (lookback=%d days)",
+            user_id,
+            self._lookback_days,
+        )
 
         await self._save_onboarding_status(user_id, OnboardingStatus.IN_PROGRESS)
 
@@ -85,7 +89,9 @@ class OnboardingService:
         try:
             # Run all three phases in parallel
             backfill_task = asyncio.create_task(
-                self._backfill_calendar(user_id, user_email, user_timezone, email_provider)
+                self._backfill_calendar(
+                    user_id, user_email, user_timezone, email_provider
+                )
             )
             history_task = asyncio.create_task(
                 self._gather_history(user_id, user_email, user_timezone, email_provider)
@@ -99,7 +105,9 @@ class OnboardingService:
                 logger.warning("Backfill phase failed: %s", backfill_result)
                 result["errors"].append(f"Backfill: {backfill_result}")
             else:
-                result["calendar_events_backfilled"] = backfill_result.get("events_added", 0)
+                result["calendar_events_backfilled"] = backfill_result.get(
+                    "events_added", 0
+                )
 
             if isinstance(history, Exception):
                 logger.warning("History gathering failed: %s", history)
@@ -158,13 +166,15 @@ class OnboardingService:
                     datetime.now(timezone.utc),
                 )
                 for ev in past_events:
-                    calendar_events.append({
-                        "title": ev.title,
-                        "start": ev.start_time.strftime("%H:%M"),
-                        "end": ev.end_time.strftime("%H:%M"),
-                        "day": ev.start_time.strftime("%A"),
-                        "date": ev.start_time.strftime("%Y-%m-%d"),
-                    })
+                    calendar_events.append(
+                        {
+                            "title": ev.title,
+                            "start": ev.start_time.strftime("%H:%M"),
+                            "end": ev.end_time.strftime("%H:%M"),
+                            "day": ev.start_time.strftime("%A"),
+                            "date": ev.start_time.strftime("%Y-%m-%d"),
+                        }
+                    )
                 logger.info(
                     "Gathered %d past calendar events for user %s",
                     len(calendar_events),
@@ -184,12 +194,14 @@ class OnboardingService:
                     query="in:sent (meeting OR schedule OR call OR available)",
                 )
                 for email_obj in emails:
-                    sent_emails.append({
-                        "subject": email_obj.subject,
-                        "body": email_obj.body_text[:800],
-                        "date": email_obj.received_at.strftime("%Y-%m-%d"),
-                        "sender": email_obj.sender_email,
-                    })
+                    sent_emails.append(
+                        {
+                            "subject": email_obj.subject,
+                            "body": email_obj.body_text[:800],
+                            "date": email_obj.received_at.strftime("%Y-%m-%d"),
+                            "sender": email_obj.sender_email,
+                        }
+                    )
             except Exception as e:
                 logger.warning("Could not fetch email history: %s", e)
 
@@ -229,7 +241,9 @@ class OnboardingService:
             for email_obj in emails:
                 try:
                     # Quick LLM call to extract confirmed event details
-                    event_data = await self._extract_confirmed_event(email_obj, user_timezone)
+                    event_data = await self._extract_confirmed_event(
+                        email_obj, user_timezone
+                    )
                     if not event_data:
                         continue
 
@@ -246,6 +260,7 @@ class OnboardingService:
 
                     # Add to the scheduling calendar
                     from src.application.dto import CreateEventDTO
+
                     dto = CreateEventDTO(
                         title=event_data["summary"],
                         start_time=start,
@@ -255,7 +270,11 @@ class OnboardingService:
                     )
                     await self._calendar.create_event(user_id, dto)
                     events_added += 1
-                    logger.debug("Backfilled event: %s at %s", event_data["summary"], event_data["start_iso"])
+                    logger.debug(
+                        "Backfilled event: %s at %s",
+                        event_data["summary"],
+                        event_data["start_iso"],
+                    )
 
                 except Exception as e:
                     logger.debug("Skipped backfill for '%s': %s", email_obj.subject, e)
@@ -293,10 +312,13 @@ If not confirmed or no specific time, respond with: null"""
                 temperature=0,
                 max_tokens=200,
             )
-            text = (response if isinstance(response, str) else response.get("content", "")).strip()
+            text = (
+                response if isinstance(response, str) else response.get("content", "")
+            ).strip()
             if text.lower() in ("null", "none", ""):
                 return None
             import json
+
             return json.loads(text)
         except Exception:
             return None
@@ -308,7 +330,9 @@ If not confirmed or no specific time, respond with: null"""
         try:
             from sqlalchemy import select
 
-            from src.infrastructure.persistence.email_models import OnboardingStatusModel
+            from src.infrastructure.persistence.email_models import (
+                OnboardingStatusModel,
+            )
 
             async with self._db() as session:
                 result = await session.execute(
@@ -330,7 +354,9 @@ If not confirmed or no specific time, respond with: null"""
         try:
             from sqlalchemy import select
 
-            from src.infrastructure.persistence.email_models import OnboardingStatusModel
+            from src.infrastructure.persistence.email_models import (
+                OnboardingStatusModel,
+            )
 
             async with self._db() as session:
                 result = await session.execute(

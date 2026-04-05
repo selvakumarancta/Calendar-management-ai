@@ -163,19 +163,28 @@ class UserGuidesService:
         import re as re_module
 
         relevant_emails = [
-            e for e in sent_emails
+            e
+            for e in sent_emails
             if scheduling_keywords.search(e.get("body", "") + e.get("subject", ""))
         ][:15]
 
         email_snippets = []
         for e in relevant_emails:
             snippet = e.get("body", "")[:300].replace("\n", " ")
-            email_snippets.append(f"  [{e.get('date', '')}] Subject: {e.get('subject', '')}\n  {snippet}")
+            email_snippets.append(
+                f"  [{e.get('date', '')}] Subject: {e.get('subject', '')}\n  {snippet}"
+            )
 
         user_content = _SCHEDULING_PREFS_USER.format(
             days=60,
-            calendar_events="\n".join(event_lines) if event_lines else "No recent events.",
-            email_snippets="\n\n".join(email_snippets) if email_snippets else "No sent emails found.",
+            calendar_events=(
+                "\n".join(event_lines) if event_lines else "No recent events."
+            ),
+            email_snippets=(
+                "\n\n".join(email_snippets)
+                if email_snippets
+                else "No sent emails found."
+            ),
         )
 
         try:
@@ -187,7 +196,9 @@ class UserGuidesService:
                 temperature=0.3,
                 max_tokens=400,
             )
-            return (response if isinstance(response, str) else response.get("content", "")).strip()
+            return (
+                response if isinstance(response, str) else response.get("content", "")
+            ).strip()
         except Exception as e:
             logger.warning("Failed to generate scheduling preferences guide: %s", e)
             return ""
@@ -202,6 +213,7 @@ class UserGuidesService:
             return ""
 
         import re as re_module
+
         scheduling_keywords = re_module.compile(
             r"\b(meet|meeting|schedule|call|sync|available|free|time|slot)\b",
             re_module.I,
@@ -209,7 +221,8 @@ class UserGuidesService:
 
         # Sample scheduling-related sent emails
         samples = [
-            e for e in sent_emails
+            e
+            for e in sent_emails
             if scheduling_keywords.search(e.get("body", "") + e.get("subject", ""))
         ][:10]
 
@@ -225,12 +238,19 @@ class UserGuidesService:
             response = await self._llm.chat_completion(
                 messages=[
                     {"role": "system", "content": _EMAIL_STYLE_SYSTEM},
-                    {"role": "user", "content": _EMAIL_STYLE_USER.format(email_samples=email_samples_text)},
+                    {
+                        "role": "user",
+                        "content": _EMAIL_STYLE_USER.format(
+                            email_samples=email_samples_text
+                        ),
+                    },
                 ],
                 temperature=0.3,
                 max_tokens=300,
             )
-            return (response if isinstance(response, str) else response.get("content", "")).strip()
+            return (
+                response if isinstance(response, str) else response.get("content", "")
+            ).strip()
         except Exception as e:
             logger.warning("Failed to generate email style guide: %s", e)
             return ""
@@ -251,13 +271,15 @@ class UserGuidesService:
 
             async with self._db() as session:
                 result = await session.execute(
-                    select(UserGuideModel).where(
-                        UserGuideModel.user_id == user_id
-                    )
+                    select(UserGuideModel).where(UserGuideModel.user_id == user_id)
                 )
                 guides = result.scalars().all()
                 scheduling = next(
-                    (g.content for g in guides if g.guide_type == "scheduling_preferences"),
+                    (
+                        g.content
+                        for g in guides
+                        if g.guide_type == "scheduling_preferences"
+                    ),
                     "",
                 )
                 style = next(

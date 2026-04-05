@@ -14,8 +14,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.domain.entities.email_message import ClassificationResult, DraftReply, EmailCategory, EmailMessage
-
+from src.domain.entities.email_message import (
+    ClassificationResult,
+    DraftReply,
+    EmailCategory,
+    EmailMessage,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

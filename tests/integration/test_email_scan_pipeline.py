@@ -14,10 +14,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.application.services.email_classifier_service import EmailClassifierService
 from src.application.services.draft_composer_service import DraftComposerService
+from src.application.services.email_classifier_service import EmailClassifierService
 from src.domain.entities.email_message import ClassificationResult, DraftReply, EmailMessage
-
 
 # ---------------------------------------------------------------------------
 # Helpers

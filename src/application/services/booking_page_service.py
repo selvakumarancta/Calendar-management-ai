@@ -123,7 +123,9 @@ class BookingPageService:
         if platform == "calendly" and self._calendly_key:
             return await self._calendly_api_slots(url, days_ahead, timezone_str)
         if platform == "calcom" and self._calcom_key:
-            return await self._calcom_api_slots(url, duration_minutes, days_ahead, timezone_str)
+            return await self._calcom_api_slots(
+                url, duration_minutes, days_ahead, timezone_str
+            )
         if platform in ("calendly", "calcom"):
             return await self._http_scrape_slots(url, days_ahead)
 
@@ -224,7 +226,9 @@ class BookingPageService:
                         break
 
                 if not et_uri:
-                    logger.warning("Calendly: could not find event type for slug '%s'", event_slug)
+                    logger.warning(
+                        "Calendly: could not find event type for slug '%s'", event_slug
+                    )
                     return []
 
                 # Get available times
@@ -247,7 +251,9 @@ class BookingPageService:
                 return [
                     {
                         "start": s["start_time"],
-                        "end": _add_minutes(s["start_time"], s.get("invitee_publisher_error", 30)),
+                        "end": _add_minutes(
+                            s["start_time"], s.get("invitee_publisher_error", 30)
+                        ),
                         "label": _format_slot_label(s["start_time"], timezone_str),
                         "scheduling_url": s.get("scheduling_url", url),
                     }
@@ -316,12 +322,14 @@ class BookingPageService:
                     for slot in day_slots:
                         start = slot.get("time", "")
                         if start:
-                            slots.append({
-                                "start": start,
-                                "end": _add_minutes(start, duration_minutes),
-                                "label": _format_slot_label(start, timezone_str),
-                                "booking_uid": slot.get("bookingUid", ""),
-                            })
+                            slots.append(
+                                {
+                                    "start": start,
+                                    "end": _add_minutes(start, duration_minutes),
+                                    "label": _format_slot_label(start, timezone_str),
+                                    "booking_uid": slot.get("bookingUid", ""),
+                                }
+                            )
                 return slots[:30]
 
         except Exception as e:
@@ -386,7 +394,12 @@ class BookingPageService:
 
         except Exception as e:
             logger.warning("Cal.com booking failed: %s", e)
-            return {"success": False, "confirmation_id": "", "join_url": "", "reason": str(e)}
+            return {
+                "success": False,
+                "confirmation_id": "",
+                "join_url": "",
+                "reason": str(e),
+            }
 
     # ------------------------------------------------------------------ #
     # HTTP scrape fallback (no API key)
@@ -414,7 +427,9 @@ class BookingPageService:
                 html = resp.text
 
             # Try __NEXT_DATA__ JSON (used by Cal.com & Calendly React apps)
-            match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+            match = re.search(
+                r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL
+            )
             if match:
                 try:
                     data = json.loads(match.group(1))
@@ -438,17 +453,25 @@ class BookingPageService:
         def _walk(obj: Any) -> None:
             if isinstance(obj, dict):
                 if "start_time" in obj and "end_time" in obj:
-                    slots.append({
-                        "start": obj["start_time"],
-                        "end": obj["end_time"],
-                        "label": _format_slot_label(obj["start_time"], "UTC"),
-                    })
-                elif "time" in obj and isinstance(obj["time"], str) and "T" in obj["time"]:
-                    slots.append({
-                        "start": obj["time"],
-                        "end": obj.get("end", ""),
-                        "label": _format_slot_label(obj["time"], "UTC"),
-                    })
+                    slots.append(
+                        {
+                            "start": obj["start_time"],
+                            "end": obj["end_time"],
+                            "label": _format_slot_label(obj["start_time"], "UTC"),
+                        }
+                    )
+                elif (
+                    "time" in obj
+                    and isinstance(obj["time"], str)
+                    and "T" in obj["time"]
+                ):
+                    slots.append(
+                        {
+                            "start": obj["time"],
+                            "end": obj.get("end", ""),
+                            "label": _format_slot_label(obj["time"], "UTC"),
+                        }
+                    )
                 for v in obj.values():
                     _walk(v)
             elif isinstance(obj, list):

@@ -319,7 +319,12 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
             # 2. Create a new secondary calendar
             new_cal = (
                 service.calendars()
-                .insert(body={"summary": calendar_name, "description": "Managed by CalendarAgent"})
+                .insert(
+                    body={
+                        "summary": calendar_name,
+                        "description": "Managed by CalendarAgent",
+                    }
+                )
                 .execute()
             )
             cal_id: str = new_cal["id"]

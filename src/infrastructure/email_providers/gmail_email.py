@@ -256,10 +256,7 @@ class GmailEmailAdapter(EmailProviderPort):
                 }
             }
             draft = (
-                service.users()
-                .drafts()
-                .create(userId="me", body=draft_body)
-                .execute()
+                service.users().drafts().create(userId="me", body=draft_body).execute()
             )
             draft_id: str = draft.get("id", "")
             logger.info(
@@ -423,9 +420,7 @@ class GmailEmailAdapter(EmailProviderPort):
                         )
                         new_emails.append(self._parse_gmail_message(full_msg, user_id))
                     except Exception as e:
-                        logger.warning(
-                            "Failed to fetch new message %s: %s", msg_id, e
-                        )
+                        logger.warning("Failed to fetch new message %s: %s", msg_id, e)
             return new_emails
         except Exception as e:
             logger.warning(

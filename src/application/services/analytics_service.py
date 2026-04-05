@@ -58,7 +58,9 @@ class AnalyticsService:
         if not self._db:
             return
         try:
-            from src.infrastructure.persistence.email_models import SchedulingAnalyticsModel
+            from src.infrastructure.persistence.email_models import (
+                SchedulingAnalyticsModel,
+            )
 
             async with self._db() as session:
                 session.add(
@@ -98,7 +100,9 @@ class AnalyticsService:
         try:
             from sqlalchemy import func, select
 
-            from src.infrastructure.persistence.email_models import SchedulingAnalyticsModel
+            from src.infrastructure.persistence.email_models import (
+                SchedulingAnalyticsModel,
+            )
 
             async with self._db() as session:
                 result = await session.execute(
@@ -117,7 +121,9 @@ class AnalyticsService:
             counts: dict[str, int] = {row.event_type: row.count for row in rows}
 
             drafts_composed = counts.get("draft_composed", 0)
-            drafts_sent = counts.get("draft_sent", 0) + counts.get("draft_sent_autopilot", 0)
+            drafts_sent = counts.get("draft_sent", 0) + counts.get(
+                "draft_sent_autopilot", 0
+            )
             invites_verified = counts.get("invite_verified", 0)
             links_booked = counts.get("link_booked", 0)
             sales_filtered = counts.get("sales_email_filtered", 0)
@@ -135,9 +141,13 @@ class AnalyticsService:
                 "sales_emails_filtered": sales_filtered,
                 "scans_completed": counts.get("scan_completed", 0),
                 "onboardings_completed": counts.get("onboarding_completed", 0),
-                "send_rate": round(drafts_sent / drafts_composed, 2) if drafts_composed else 0.0,
+                "send_rate": (
+                    round(drafts_sent / drafts_composed, 2) if drafts_composed else 0.0
+                ),
                 "invite_success_rate": round(invites_verified / max(drafts_sent, 1), 2),
-                "booking_rate": round(links_booked / max(counts.get("link_created", 1), 1), 2),
+                "booking_rate": round(
+                    links_booked / max(counts.get("link_created", 1), 1), 2
+                ),
                 "raw_counts": counts,
             }
         except Exception as e:
@@ -156,12 +166,13 @@ class AnalyticsService:
         try:
             from sqlalchemy import select
 
-            from src.infrastructure.persistence.email_models import SchedulingAnalyticsModel
+            from src.infrastructure.persistence.email_models import (
+                SchedulingAnalyticsModel,
+            )
 
             async with self._db() as session:
-                q = (
-                    select(SchedulingAnalyticsModel)
-                    .where(SchedulingAnalyticsModel.user_id == user_id)
+                q = select(SchedulingAnalyticsModel).where(
+                    SchedulingAnalyticsModel.user_id == user_id
                 )
                 if event_type:
                     q = q.where(SchedulingAnalyticsModel.event_type == event_type)

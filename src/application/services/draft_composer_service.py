@@ -184,7 +184,8 @@ class DraftComposerService:
             calendar_summary=calendar_summary,
             declined_times=declined_times,
             email_style_guide=email_style_guide or DEFAULT_EMAIL_STYLE,
-            scheduling_preferences_guide=scheduling_preferences_guide or DEFAULT_SCHEDULING_PREFERENCES,
+            scheduling_preferences_guide=scheduling_preferences_guide
+            or DEFAULT_SCHEDULING_PREFERENCES,
         )
 
         if not draft_data or draft_data.get("skip"):
@@ -201,11 +202,11 @@ class DraftComposerService:
         reply_body = self._add_footer(reply_body)
 
         # 5. Determine if this is a group meeting
-        all_participants = list(set(
-            email.recipients + email.cc + [email.sender_email]
-        ))
+        all_participants = list(set(email.recipients + email.cc + [email.sender_email]))
         # Exclude the user's own email
-        other_participants = [p for p in all_participants if p.lower() != user_email.lower()]
+        other_participants = [
+            p for p in all_participants if p.lower() != user_email.lower()
+        ]
         is_group = len(other_participants) >= 2
 
         # 6. Create draft or send immediately (autopilot for 1:1 only)
@@ -218,14 +219,18 @@ class DraftComposerService:
 
         if autopilot_enabled and not is_group and not draft_data.get("is_confirmation"):
             # Autopilot: send directly for 1:1 scheduling
-            sent_id = await email_provider.send_email_reply(
-                user_id=user_id,
-                thread_id=email.thread_id,
-                to=reply_to,
-                subject=reply_subject,
-                body=reply_body,
-                cc=reply_cc,
-            ) if hasattr(email_provider, "send_email_reply") else ""
+            sent_id = (
+                await email_provider.send_email_reply(
+                    user_id=user_id,
+                    thread_id=email.thread_id,
+                    to=reply_to,
+                    subject=reply_subject,
+                    body=reply_body,
+                    cc=reply_cc,
+                )
+                if hasattr(email_provider, "send_email_reply")
+                else ""
+            )
 
             if not sent_id:
                 # Fallback: create draft if send failed
@@ -418,12 +423,20 @@ class DraftComposerService:
             logger.warning("Could not fetch calendar summary: %s", e)
             return "Calendar data unavailable."
 
-    def _extract_declined_times(self, thread_messages: list[ThreadMessage]) -> list[str]:
+    def _extract_declined_times(
+        self, thread_messages: list[ThreadMessage]
+    ) -> list[str]:
         """Extract times that were already declined in the thread."""
         declined: list[str] = []
         decline_patterns = [
-            re.compile(r"(can['']?t|cannot|won['']?t|doesn['']?t work|not available).{0,60}(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", re.I),
-            re.compile(r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?).{0,40}(doesn['']?t work|not available|can['']?t)", re.I),
+            re.compile(
+                r"(can['']?t|cannot|won['']?t|doesn['']?t work|not available).{0,60}(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
+                re.I,
+            ),
+            re.compile(
+                r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?).{0,40}(doesn['']?t work|not available|can['']?t)",
+                re.I,
+            ),
         ]
         for msg in thread_messages:
             for pattern in decline_patterns:
@@ -464,7 +477,11 @@ class DraftComposerService:
                     proposed_windows_json=json.dumps(draft.proposed_windows),
                     duration_minutes=draft.duration_minutes,
                     event_summary=draft.event_summary,
-                    pending_invite_json=json.dumps(draft.pending_invite) if draft.pending_invite else None,
+                    pending_invite_json=(
+                        json.dumps(draft.pending_invite)
+                        if draft.pending_invite
+                        else None
+                    ),
                     status=draft.status.value,
                     is_group_meeting=draft.is_group_meeting,
                     autopilot_eligible=draft.autopilot_eligible,

@@ -15,7 +15,6 @@ import pytest
 
 from src.application.services.analytics_service import AnalyticsService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -100,7 +99,12 @@ class TestAnalyticsService:
         service = AnalyticsService(db_session_factory=factory)
         uid = uuid.uuid4()
 
-        for event in ["draft_composed", "link_booked", "scan_completed", "onboarding_completed"]:
+        for event in [
+            "draft_composed",
+            "link_booked",
+            "scan_completed",
+            "onboarding_completed",
+        ]:
             await service.record(user_id=uid, event_type=event)
 
         # 4 events recorded

@@ -58,7 +58,7 @@ _CLASSIFIER_SYSTEM_PROMPT = """You are an email scheduling classifier. Analyze i
 2. Is it cold sales outreach to ignore?
 
 Return ONLY a JSON object matching this exact schema:
-{
+{{
   "needs_draft": boolean,
   "confidence": float 0.0-1.0,
   "category": one of "meeting_request|meeting_reschedule|meeting_cancellation|task_assignment|deadline_reminder|appointment|event_invitation|follow_up|non_actionable",
@@ -68,7 +68,7 @@ Return ONLY a JSON object matching this exact schema:
   "duration_minutes": integer or null,
   "is_sales_email": boolean,
   "already_resolved": boolean
-}
+}}
 
 needs_draft = true examples:
 - Someone personally requests a meeting (not mass email)
@@ -171,7 +171,9 @@ class EmailClassifierService:
         # Step 2: LLM classification
         if self._llm:
             try:
-                return await self._llm_classify(email, thread_messages or [], user_email)
+                return await self._llm_classify(
+                    email, thread_messages or [], user_email
+                )
             except Exception as e:
                 logger.warning(
                     "LLM classifier failed for '%s': %s — falling back to heuristic",
@@ -199,8 +201,7 @@ class EmailClassifierService:
             for msg in prior_messages:
                 date_line = f" ({msg.date})" if msg.date else ""
                 thread_section += (
-                    f"From: {msg.sender}{date_line}\n"
-                    f"{msg.body[:800]}\n\n"
+                    f"From: {msg.sender}{date_line}\n" f"{msg.body[:800]}\n\n"
                 )
             thread_section += "--- End of thread history ---\n\n"
 

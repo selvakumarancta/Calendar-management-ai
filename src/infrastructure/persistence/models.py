@@ -44,12 +44,24 @@ class UserModel(Base):
     )
 
     # User preferences & autopilot (added for gap implementation)
-    autopilot_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    email_draft_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    scheduling_calendar_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    scheduling_guide_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    style_guide_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    autopilot_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    email_draft_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    scheduling_calendar_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    onboarding_completed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    scheduling_guide_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    style_guide_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

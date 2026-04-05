@@ -36,7 +36,7 @@ Analyze the given message and determine:
 A "commitment" is when at least one party is expressing willingness to meet at a specific time or clearly proposing one.
 
 Respond ONLY with JSON:
-{
+{{
   "has_commitment": boolean,
   "confidence": 0.0-1.0,
   "event_summary": "string or null",
@@ -48,7 +48,7 @@ Respond ONLY with JSON:
   "notes": "any context worth keeping",
   "is_question": boolean,
   "needs_reply": boolean
-}
+}}
 
 Rules:
 - proposed_start must be absolute ISO8601 if the date/time is clear; null if only relative hints like "tomorrow"
@@ -132,7 +132,9 @@ class MessageHookService:
         }
 
         if should_create:
-            create_result = await self._create_event_from_extraction(user_id, extraction)
+            create_result = await self._create_event_from_extraction(
+                user_id, extraction
+            )
             result.update(create_result)
 
         return result
@@ -162,7 +164,9 @@ class MessageHookService:
                 temperature=0,
                 max_tokens=400,
             )
-            text = (response if isinstance(response, str) else response.get("content", "")).strip()
+            text = (
+                response if isinstance(response, str) else response.get("content", "")
+            ).strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             return json.loads(text)
@@ -195,7 +199,9 @@ class MessageHookService:
                 title=extraction.get("event_summary", "Meeting"),
                 start_time=start_dt,
                 end_time=end_dt,
-                description=extraction.get("notes", "Created by CalendarAgent message hook"),
+                description=extraction.get(
+                    "notes", "Created by CalendarAgent message hook"
+                ),
                 location=extraction.get("location", ""),
                 attendee_emails=[
                     a for a in extraction.get("attendees", []) if "@" in str(a)

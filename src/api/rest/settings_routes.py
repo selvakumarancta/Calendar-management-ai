@@ -519,7 +519,9 @@ async def get_user_preferences(
         "email_draft_enabled": getattr(user_row, "email_draft_enabled", True),
         "scheduling_calendar_id": getattr(user_row, "scheduling_calendar_id", None),
         "onboarding_completed": getattr(user_row, "onboarding_completed", False),
-        "scheduling_guide_generated": getattr(user_row, "scheduling_guide_generated", False),
+        "scheduling_guide_generated": getattr(
+            user_row, "scheduling_guide_generated", False
+        ),
         "style_guide_generated": getattr(user_row, "style_guide_generated", False),
     }
 
@@ -586,7 +588,8 @@ async def setup_scheduling_calendar(
 
     if not hasattr(cal_adapter, "get_or_create_scheduling_calendar"):
         raise HTTPException(
-            status_code=501, detail="Dedicated scheduling calendar not supported by current adapter"
+            status_code=501,
+            detail="Dedicated scheduling calendar not supported by current adapter",
         )
 
     cal_id = await cal_adapter.get_or_create_scheduling_calendar(

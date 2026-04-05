@@ -46,9 +46,9 @@ class SuggestionPriority(str, Enum):
 class DraftStatus(str, Enum):
     """Status of a generated email draft reply."""
 
-    PENDING = "pending"       # Draft created in Gmail, awaiting user review
-    SENT = "sent"             # User sent the draft
-    DISCARDED = "discarded"   # User deleted without sending
+    PENDING = "pending"  # Draft created in Gmail, awaiting user review
+    SENT = "sent"  # User sent the draft
+    DISCARDED = "discarded"  # User deleted without sending
     AUTOPILOT_SENT = "autopilot_sent"  # Sent automatically in autopilot mode
 
 
@@ -82,7 +82,9 @@ class EmailMessage:
 
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     thread_id: str = ""  # Conversation thread ID
-    thread_messages: list[ThreadMessage] = field(default_factory=list)  # Full thread history
+    thread_messages: list[ThreadMessage] = field(
+        default_factory=list
+    )  # Full thread history
     labels: list[str] = field(default_factory=list)
     has_attachments: bool = False
     is_read: bool = False
@@ -103,15 +105,17 @@ class EmailMessage:
 class ClassificationResult:
     """Structured LLM classification of an email's scheduling intent."""
 
-    needs_draft: bool = False               # True if a draft reply is needed
+    needs_draft: bool = False  # True if a draft reply is needed
     confidence: float = 0.0
     category: EmailCategory = EmailCategory.NON_ACTIONABLE
     summary: str = ""
-    proposed_times: list[str] = field(default_factory=list)  # Times extracted from email
+    proposed_times: list[str] = field(
+        default_factory=list
+    )  # Times extracted from email
     participants: list[str] = field(default_factory=list)
     duration_minutes: int | None = None
-    is_sales_email: bool = False            # Unsolicited cold outreach — skip
-    already_resolved: bool = False          # Thread already has a confirmed time
+    is_sales_email: bool = False  # Unsolicited cold outreach — skip
+    already_resolved: bool = False  # Thread already has a confirmed time
 
 
 @dataclass
@@ -149,18 +153,18 @@ class DraftReply:
     org_id: uuid.UUID | None = None
 
     # Source email / thread
-    email_provider_id: str = ""          # Original email's provider msg ID
-    thread_id: str = ""                  # Gmail thread ID
+    email_provider_id: str = ""  # Original email's provider msg ID
+    thread_id: str = ""  # Gmail thread ID
     email_subject: str = ""
     email_sender: str = ""
     email_received_at: datetime | None = None
 
     # The draft
-    draft_provider_id: str = ""          # Gmail draft ID (for deletion/update)
-    reply_to: str = ""                   # Who the reply goes to
+    draft_provider_id: str = ""  # Gmail draft ID (for deletion/update)
+    reply_to: str = ""  # Who the reply goes to
     reply_cc: str = ""
     reply_subject: str = ""
-    reply_body: str = ""                 # Full draft body text
+    reply_body: str = ""  # Full draft body text
 
     # Proposed calendar slots extracted from the draft body
     proposed_windows: list[dict] = field(default_factory=list)  # [{date, start, end}]
@@ -168,12 +172,12 @@ class DraftReply:
     event_summary: str = ""
 
     # Invite proposal (set when draft confirms a meeting)
-    pending_invite: dict | None = None   # {title, start, end, attendees, location}
+    pending_invite: dict | None = None  # {title, start, end, attendees, location}
 
     # Status
     status: DraftStatus = DraftStatus.PENDING
-    is_group_meeting: bool = False       # Group meetings always go through draft review
-    autopilot_eligible: bool = False     # 1:1 meeting that could be autopilot-sent
+    is_group_meeting: bool = False  # Group meetings always go through draft review
+    autopilot_eligible: bool = False  # 1:1 meeting that could be autopilot-sent
 
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sent_at: datetime | None = None
@@ -274,7 +278,7 @@ class UserGuide:
     id: uuid.UUID = field(default_factory=uuid.uuid4)
     user_id: uuid.UUID | None = None
     guide_type: str = ""  # "scheduling_preferences" | "email_style"
-    content: str = ""     # Markdown text of the guide
+    content: str = ""  # Markdown text of the guide
     version: int = 1
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     emails_analyzed: int = 0
@@ -286,7 +290,9 @@ class AnalyticsEvent:
 
     id: uuid.UUID = field(default_factory=uuid.uuid4)
     user_id: uuid.UUID | None = None
-    event_type: str = ""   # "draft_composed" | "draft_sent" | "draft_discarded" | "invite_created" | "scan_completed"
+    event_type: str = (
+        ""  # "draft_composed" | "draft_sent" | "draft_discarded" | "invite_created" | "scan_completed"
+    )
     properties: dict = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

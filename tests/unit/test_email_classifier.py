@@ -16,7 +16,6 @@ import pytest
 from src.application.services.email_classifier_service import EmailClassifierService
 from src.domain.entities.email_message import EmailMessage
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -118,6 +117,7 @@ class TestEmailClassifierLLMPath:
 
     @pytest.mark.asyncio
     async def test_llm_meeting_request(self):
+        """LLM path: mock returns meeting_request JSON, classifier must honour it."""
         llm_json = (
             '{"needs_draft": true, "confidence": 0.95, "category": "meeting_request",'
             ' "is_sales_email": false, "already_resolved": false,'
@@ -128,20 +128,22 @@ class TestEmailClassifierLLMPath:
         email = _email(subject="Team sync", body="Can we meet tomorrow at 3pm?")
         result = await service.classify(email)
         assert result.needs_draft is True
-        assert result.confidence >= 0.5  # LLM path; falls back to heuristic if JSON parse fails
+        assert result.confidence == 0.95  # exact LLM value
+        assert result.duration_minutes == 30
 
     @pytest.mark.asyncio
     async def test_llm_sales_detection(self):
+        """LLM path: mock flags is_sales_email=True, classifier must honour it."""
         llm_json = (
-            '{"needs_draft": false, "confidence": 0.88, "category": "sales",'
+            '{"needs_draft": false, "confidence": 0.88, "category": "non_actionable",'
             ' "is_sales_email": true, "already_resolved": false,'
             ' "participants": [], "duration_minutes": null, "proposed_times": []}'
         )
         service = self._service_with_mock(llm_json)
         email = _email(subject="Special offer just for you", body="Act now and save 50%!")
         result = await service.classify(email)
-        # LLM path: if JSON parses ok -> is_sales_email=True; if falls back to heuristic -> needs_draft=False
-        assert result.is_sales_email is True or result.needs_draft is False
+        assert result.is_sales_email is True
+        assert result.needs_draft is False
 
     @pytest.mark.asyncio
     async def test_llm_malformed_json_falls_back_to_rule_based(self):

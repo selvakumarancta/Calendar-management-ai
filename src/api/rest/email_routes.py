@@ -331,9 +331,7 @@ async def list_drafts(
 
     db = container.database()
     async with db.session_factory() as session:
-        q = select(DraftReplyModel).where(
-            DraftReplyModel.user_id == current_user.id
-        )
+        q = select(DraftReplyModel).where(DraftReplyModel.user_id == current_user.id)
         if status:
             q = q.where(DraftReplyModel.status == status)
         q = q.order_by(DraftReplyModel.created_at.desc()).limit(limit)
@@ -443,9 +441,13 @@ async def send_draft(
         )
         email_adapter.set_db_session_factory(db.session_factory)
 
-        success = await email_adapter.send_draft(current_user.id, draft.provider_draft_id)
+        success = await email_adapter.send_draft(
+            current_user.id, draft.provider_draft_id
+        )
         if not success:
-            raise HTTPException(status_code=502, detail="Failed to send draft via email provider")
+            raise HTTPException(
+                status_code=502, detail="Failed to send draft via email provider"
+            )
 
         draft.was_sent = True
         draft.status = "sent"
@@ -535,7 +537,10 @@ async def start_onboarding(
         )
     )
 
-    return {"status": "started", "message": "Onboarding started in background. Check /email/onboarding/status for progress."}
+    return {
+        "status": "started",
+        "message": "Onboarding started in background. Check /email/onboarding/status for progress.",
+    }
 
 
 @email_router.get("/onboarding/status")
@@ -558,7 +563,9 @@ async def get_onboarding_status(
 
 
 class GuideUpdateRequest(BaseModel):
-    content: str = Field(..., description="New guide content (plain text, bullet points)")
+    content: str = Field(
+        ..., description="New guide content (plain text, bullet points)"
+    )
 
 
 @email_router.get("/guides")
@@ -826,7 +833,9 @@ async def get_scheduling_link(
     )
     link = await service.get_link(link_id)
     if not link:
-        raise HTTPException(status_code=410, detail="Scheduling link not found or expired")
+        raise HTTPException(
+            status_code=410, detail="Scheduling link not found or expired"
+        )
     return link
 
 
@@ -850,7 +859,9 @@ async def book_scheduling_slot(
         attendee_email=request.attendee_email,
     )
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("reason", "Booking failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("reason", "Booking failed")
+        )
     return result
 
 
@@ -1016,6 +1027,7 @@ async def book_booking_page_slot(
         notes=request.notes,
     )
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("reason", "Booking failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("reason", "Booking failed")
+        )
     return result
-

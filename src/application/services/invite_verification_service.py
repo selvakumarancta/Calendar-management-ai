@@ -38,7 +38,7 @@ You are given:
 Your job: decide whether the sent message confirms, modifies, or cancels the meeting.
 
 Return ONLY a JSON object:
-{
+{{
   "action": "send" | "update" | "skip",
   "reason": "brief explanation",
   "updated_event_summary": null or string,
@@ -47,7 +47,7 @@ Return ONLY a JSON object:
   "updated_attendees": null or [string],
   "updated_location": null or string,
   "add_google_meet": null or boolean
-}
+}}
 
 Actions:
 - "send": Sent message confirms the meeting exactly as proposed.
@@ -122,7 +122,9 @@ class InviteVerificationService:
 
         if action == "skip":
             logger.info(
-                "Invite skipped for draft %s: %s", draft_reply_id, verification.get("reason")
+                "Invite skipped for draft %s: %s",
+                draft_reply_id,
+                verification.get("reason"),
             )
             return {"action": "skipped", "reason": verification.get("reason", "")}
 
@@ -216,7 +218,9 @@ class InviteVerificationService:
                 temperature=0,
                 max_tokens=400,
             )
-            text = (response if isinstance(response, str) else response.get("content", "")).strip()
+            text = (
+                response if isinstance(response, str) else response.get("content", "")
+            ).strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             data = json.loads(text)
@@ -236,9 +240,7 @@ class InviteVerificationService:
 
             async with self._db() as session:
                 result = await session.execute(
-                    select(DraftReplyModel).where(
-                        DraftReplyModel.id == draft_reply_id
-                    )
+                    select(DraftReplyModel).where(DraftReplyModel.id == draft_reply_id)
                 )
                 record = result.scalars().first()
                 if record and record.pending_invite_json:

@@ -168,9 +168,15 @@ class DraftReplyModel(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
 
     # Gmail references
-    provider_draft_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    thread_id: Mapped[str] = mapped_column(String(255), nullable=False, default="", index=True)
-    original_email_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    provider_draft_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    thread_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", index=True
+    )
+    original_email_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
 
     # Recipients
     to_email: Mapped[str] = mapped_column(String(320), nullable=False, default="")
@@ -179,10 +185,14 @@ class DraftReplyModel(Base):
 
     # Draft content
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    content_type: Mapped[str] = mapped_column(String(50), nullable=False, default="text/plain")
+    content_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="text/plain"
+    )
 
     # Proposed meeting windows stored as JSON list of {start, end, label}
-    proposed_windows_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    proposed_windows_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
 
     # If a calendar invite should be sent after user confirms, store the pending
     # invite details here (JSON). Checked by InviteVerificationService.
@@ -193,7 +203,9 @@ class DraftReplyModel(Base):
 
     # Whether the draft was sent by autopilot or user
     was_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    sent_by_autopilot: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sent_by_autopilot: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="ready", index=True
@@ -204,7 +216,9 @@ class DraftReplyModel(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class UserGuideModel(Base):
@@ -243,7 +257,9 @@ class SchedulingLinkModel(Base):
     __tablename__ = "scheduling_links"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    link_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    link_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
 
     mode: Mapped[str] = mapped_column(String(20), nullable=False, default="suggested")
@@ -255,16 +271,22 @@ class SchedulingLinkModel(Base):
     thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # JSON list of {"start": ISO8601, "end": ISO8601}
-    suggested_windows_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    suggested_windows_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
 
     is_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    booked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class OnboardingStatusModel(Base):
@@ -273,7 +295,9 @@ class OnboardingStatusModel(Base):
     __tablename__ = "onboarding_status"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, unique=True, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, nullable=False, unique=True, index=True
+    )
 
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="not_started"
@@ -328,8 +352,12 @@ class PendingInviteModel(Base):
     draft_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
 
     event_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    event_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    event_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    event_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    event_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     attendees_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     location: Mapped[str] = mapped_column(String(500), nullable=False, default="")
 
@@ -342,5 +370,7 @@ class PendingInviteModel(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     calendar_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

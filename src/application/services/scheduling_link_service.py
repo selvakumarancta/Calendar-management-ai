@@ -164,9 +164,15 @@ class SchedulingLinkService:
                     "mode": record.mode,
                     "duration_minutes": record.duration_minutes,
                     "subject": record.subject,
-                    "suggested_windows": json.loads(record.suggested_windows_json or "[]"),
-                    "expires_at": record.expires_at.isoformat() if record.expires_at else None,
-                    "created_at": record.created_at.isoformat() if record.created_at else None,
+                    "suggested_windows": json.loads(
+                        record.suggested_windows_json or "[]"
+                    ),
+                    "expires_at": (
+                        record.expires_at.isoformat() if record.expires_at else None
+                    ),
+                    "created_at": (
+                        record.created_at.isoformat() if record.created_at else None
+                    ),
                 }
         except Exception as e:
             logger.error("get_link failed: %s", e)
@@ -207,7 +213,10 @@ class SchedulingLinkService:
                 break
 
         if not selected_window and link["mode"] == "suggested":
-            return {"success": False, "reason": "Selected time is not in the list of suggested windows"}
+            return {
+                "success": False,
+                "reason": "Selected time is not in the list of suggested windows",
+            }
 
         end_dt = chosen_dt + timedelta(minutes=duration)
 
@@ -217,6 +226,7 @@ class SchedulingLinkService:
                 user_id = uuid.UUID(link["user_id"])
 
                 from src.application.dto import CreateEventDTO
+
                 dto = CreateEventDTO(
                     title=link.get("subject") or f"Meeting with {attendee_name}",
                     start_time=chosen_dt,
@@ -227,7 +237,10 @@ class SchedulingLinkService:
                 event = await self._calendar.create_event(user_id, dto)
                 logger.info(
                     "Slot booked via link %s: '%s' at %s by %s",
-                    link_id, dto.title, chosen_dt, attendee_email,
+                    link_id,
+                    dto.title,
+                    chosen_dt,
+                    attendee_email,
                 )
                 await self._mark_link_used(link_id)
                 if self._analytics:
@@ -286,11 +299,12 @@ class SchedulingLinkService:
 
             # Check for overlap with busy times
             overlaps = any(
-                not (slot_end <= b_start or current >= b_end)
-                for b_start, b_end in busy
+                not (slot_end <= b_start or current >= b_end) for b_start, b_end in busy
             )
             if not overlaps:
-                slots.append({"start": current.isoformat(), "end": slot_end.isoformat()})
+                slots.append(
+                    {"start": current.isoformat(), "end": slot_end.isoformat()}
+                )
                 current = slot_end  # advance past this slot
             else:
                 current += timedelta(minutes=30)
@@ -313,7 +327,9 @@ class SchedulingLinkService:
 
         if self._db:
             try:
-                from src.infrastructure.persistence.email_models import SchedulingLinkModel
+                from src.infrastructure.persistence.email_models import (
+                    SchedulingLinkModel,
+                )
 
                 async with self._db() as session:
                     session.add(
