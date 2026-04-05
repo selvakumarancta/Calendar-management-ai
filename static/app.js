@@ -648,6 +648,8 @@ async function loadEmailView() {
     loadEmailProviders(),
     loadScannedEmails(),
     loadEmailSuggestions(),
+    loadDrafts(),
+    loadUserPreferences(),
   ]);
 }
 
@@ -820,17 +822,27 @@ function switchEmailTab(tab) {
   const allEmails = document.getElementById("email-all-list");
   const suggestions = document.getElementById("email-suggestions");
   const history = document.getElementById("email-history");
+  const draftsList = document.getElementById("email-drafts-list");
+  const analytics = document.getElementById("email-analytics");
 
   allEmails.style.display = "none";
   suggestions.style.display = "none";
   history.style.display = "none";
+  draftsList.style.display = "none";
+  analytics.style.display = "none";
 
   if (tab === "emails") {
     allEmails.style.display = "block";
     renderScannedEmails();
+  } else if (tab === "drafts") {
+    draftsList.style.display = "block";
+    renderDrafts();
   } else if (tab === "history") {
     history.style.display = "block";
     loadScanHistory();
+  } else if (tab === "analytics") {
+    analytics.style.display = "block";
+    loadAnalytics();
   } else {
     suggestions.style.display = "block";
     renderEmailTab(tab);
@@ -1053,6 +1065,184 @@ async function loadScanHistory() {
   } catch (e) {
     container.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
   }
+}
+
+// ── User Preferences / Autopilot ─────────────────────────────
+
+let userPreferences = { autopilot_enabled: false };
+
+async function loadUserPreferences() {
+  try {
+    userPreferences = await api("GET", "/api/v1/settings/user-preferences");
+    const toggle = document.getElementById("autopilot-toggle");
+    if (toggle) toggle.checked = !!userPreferences.autopilot_enabled;
+    const label = document.getElementById("autopilot-label");
+    if (label) label.textContent = userPreferences.autopilot_enabled ? "Autopilot ON" : "Autopilot";
+  } catch (e) { /* ignore — endpoint may need auth first */ }
+}
+
+async function toggleAutopilot() {
+  const toggle = document.getElementById("autopilot-toggle");
+  const label = document.getElementById("autopilot-label");
+  const newVal = toggle.checked;
+  try {
+    await api("PUT", "/api/v1/settings/user-preferences", { autopilot_enabled: newVal });
+    userPreferences.autopilot_enabled = newVal;
+    if (label) label.textContent = newVal ? "Autopilot ON" : "Autopilot";
+    showToast(newVal ? "Autopilot enabled — 1:1 meeting drafts will be sent automatically" : "Autopilot disabled");
+  } catch (e) {
+    toggle.checked = !newVal;
+    showToast("Failed: " + e.message, "error");
+  }
+}
+
+// ── Drafts ─────────────────────────────────────────────────────
+
+let emailDrafts = [];
+
+async function loadDrafts() {
+  try {
+    emailDrafts = await api("GET", "/api/v1/email/drafts");
+    const badge = document.getElementById("tab-count-drafts");
+    if (badge) badge.textContent = emailDrafts.length;
+    if (emailCurrentTab === "drafts") renderDrafts();
+  } catch (e) {
+    emailDrafts = [];
+  }
+}
+
+function renderDrafts() {
+  const container = document.getElementById("email-drafts-list");
+  if (!emailDrafts.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">\u270d\ufe0f</div>No drafts yet. Scan your inbox to compose AI-drafted meeting replies.</div>';
+    return;
+  }
+  container.innerHTML = emailDrafts.map(d => renderDraftCard(d)).join("");
+}
+
+function renderDraftCard(d) {
+  const statusLabels = {
+    pending: "\u23f3 Pending Review",
+    sent: "\u2705 Sent",
+    autopilot_sent: "\ud83e\udd16 Auto-sent",
+    discarded: "\ud83d\uddd1 Discarded",
+  };
+  const statusColors = {
+    pending: "var(--accent)",
+    sent: "var(--green)",
+    autopilot_sent: "#9b59b6",
+    discarded: "var(--text3)",
+  };
+  const status = d.status || "pending";
+  const statusLabel = statusLabels[status] || status;
+  const statusColor = statusColors[status] || "var(--text2)";
+  const createdAt = d.created_at ? fmtRelativeTime(d.created_at) : "";
+  const isPending = status === "pending";
+
+  const proposedTimes = (d.proposed_windows || []).slice(0, 3).map(w => {
+    const start = new Date(w.start || w.date || w);
+    if (isNaN(start)) return "";
+    return start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) +
+      " " + start.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }).filter(Boolean).join(" · ");
+
+  return `
+    <div class="draft-card" id="draft-card-${d.id}">
+      <div class="draft-card-header">
+        <div class="draft-meta">
+          <span class="draft-status-badge" style="color:${statusColor}">${statusLabel}</span>
+          ${d.is_group_meeting ? '<span class="draft-badge">\ud83d\udc65 Group</span>' : '<span class="draft-badge">1:1</span>'}
+          ${d.autopilot_eligible ? '<span class="draft-badge autopilot-badge">\ud83e\udd16 Autopilot eligible</span>' : ''}
+        </div>
+        <span class="draft-time">${createdAt}</span>
+      </div>
+      <div class="draft-card-body">
+        <div class="draft-subject">${esc(d.email_subject || "(no subject)")}</div>
+        <div class="draft-from">To: ${esc(d.email_sender || "")}</div>
+        ${proposedTimes ? `<div class="draft-times">\ud83d\udcc5 Proposed: ${proposedTimes}</div>` : ""}
+        <div class="draft-preview">${esc((d.reply_body || "").slice(0, 240))}${(d.reply_body || "").length > 240 ? "\u2026" : ""}</div>
+      </div>
+      ${isPending ? `
+      <div class="draft-actions">
+        <button class="btn btn-primary btn-sm" onclick="sendDraft('${d.id}')">\ud83d\udce4 Send Now</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteDraft('${d.id}')">\ud83d\uddd1 Discard</button>
+      </div>` : ""}
+    </div>
+  `;
+}
+
+async function sendDraft(id) {
+  const card = document.getElementById("draft-card-" + id);
+  const btns = card ? card.querySelectorAll("button") : [];
+  btns.forEach(b => b.disabled = true);
+  try {
+    await api("POST", `/api/v1/email/drafts/${id}/send`);
+    showToast("Draft sent!");
+    await loadDrafts();
+  } catch (e) {
+    showToast("Send failed: " + e.message, "error");
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+async function deleteDraft(id) {
+  if (!confirm("Discard this draft?")) return;
+  try {
+    await api("DELETE", `/api/v1/email/drafts/${id}`);
+    showToast("Draft discarded");
+    await loadDrafts();
+  } catch (e) {
+    showToast("Failed: " + e.message, "error");
+  }
+}
+
+// ── Analytics ──────────────────────────────────────────────────
+
+async function loadAnalytics() {
+  const container = document.getElementById("email-analytics");
+  container.innerHTML = '<div class="empty-state">Loading analytics...</div>';
+  try {
+    const summary = await api("GET", "/api/v1/email/analytics/summary?days=30");
+    renderAnalyticsSummary(summary, container);
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
+  }
+}
+
+function renderAnalyticsSummary(summary, container) {
+  const events = summary.events || summary;
+  const statCards = [
+    { label: "Drafts Composed",  value: events.draft_composed          || 0, icon: "\u270d\ufe0f", color: "var(--accent)" },
+    { label: "Drafts Sent",      value: (events.draft_sent || 0) + (events.draft_sent_autopilot || 0), icon: "\ud83d\udce4", color: "var(--green)" },
+    { label: "Auto-pilot Sent",  value: events.draft_sent_autopilot    || 0, icon: "\ud83e\udd16", color: "#9b59b6" },
+    { label: "Links Created",    value: events.link_created            || 0, icon: "\ud83d\udd17", color: "#3498db" },
+    { label: "Links Booked",     value: events.link_booked             || 0, icon: "\ud83d\udcc5", color: "#e67e22" },
+    { label: "Scans Completed",  value: events.scan_completed          || 0, icon: "\ud83d\udd0d", color: "var(--text2)" },
+  ];
+
+  const total = statCards.reduce((a, c) => a + c.value, 0);
+
+  if (!total) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">\ud83d\udcca</div>No analytics data yet. Scan emails to start tracking activity.</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="analytics-header">
+      <h3>Last 30 Days</h3>
+      <span class="analytics-total">${total} total events</span>
+    </div>
+    <div class="analytics-stats-grid">
+      ${statCards.map(c => `
+        <div class="analytics-stat-card">
+          <div class="analytics-stat-icon" style="color:${c.color}">${c.icon}</div>
+          <div class="analytics-stat-value">${c.value}</div>
+          <div class="analytics-stat-label">${c.label}</div>
+        </div>
+      `).join("")}
+    </div>
+    ${summary.period_days ? `<div class="analytics-footer">Period: last ${summary.period_days} days</div>` : ""}
+  `;
 }
 
 // ── API helper ─────────────────────────────────────────────────

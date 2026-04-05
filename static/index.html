@@ -143,6 +143,11 @@
             <div class="view-header-right email-controls">
               <select id="email-provider-select" class="select-minimal"><option value="google">Gmail</option><option value="microsoft">Outlook</option></select>
               <select id="email-since-hours" class="select-minimal"><option value="24">24h</option><option value="48">48h</option><option value="72">3 days</option><option value="168">7 days</option></select>
+              <label class="autopilot-toggle" title="Autopilot: send 1:1 meeting drafts automatically">
+                <input type="checkbox" id="autopilot-toggle" onchange="toggleAutopilot()" />
+                <span class="autopilot-track"></span>
+                <span id="autopilot-label" class="autopilot-text">Autopilot</span>
+              </label>
               <button class="btn btn-primary btn-sm" id="btn-email-scan" onclick="triggerEmailScan()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 Scan
@@ -153,14 +158,18 @@
           <div class="email-providers-bar" id="email-providers-bar"></div>
           <div class="tab-bar">
             <button class="tab active" data-tab="emails" onclick="switchEmailTab('emails')">All Emails <span id="tab-count-emails" class="tab-count">0</span></button>
+            <button class="tab" data-tab="drafts" onclick="switchEmailTab('drafts')">Drafts <span id="tab-count-drafts" class="tab-count">0</span></button>
             <button class="tab" data-tab="pending" onclick="switchEmailTab('pending')">Pending <span id="tab-count-pending" class="tab-count">0</span></button>
             <button class="tab" data-tab="approved" onclick="switchEmailTab('approved')">Approved <span id="tab-count-approved" class="tab-count">0</span></button>
             <button class="tab" data-tab="rejected" onclick="switchEmailTab('rejected')">Dismissed <span id="tab-count-rejected" class="tab-count">0</span></button>
             <button class="tab" data-tab="history" onclick="switchEmailTab('history')">History</button>
+            <button class="tab" data-tab="analytics" onclick="switchEmailTab('analytics')">Analytics</button>
           </div>
           <div id="email-all-list" class="content-scroll"><div class="empty-state"><div class="empty-icon">📬</div>Scan your inbox to detect meetings</div></div>
+          <div id="email-drafts-list" class="content-scroll" style="display:none"><div class="empty-state"><div class="empty-icon">✍️</div>No drafts yet. Scan your inbox to compose AI-drafted meeting replies.</div></div>
           <div id="email-suggestions" class="content-scroll" style="display:none"><div class="empty-state"><div class="empty-icon">💡</div>Suggestions appear after scanning</div></div>
           <div id="email-history" class="content-scroll" style="display:none"></div>
+          <div id="email-analytics" class="content-scroll padded" style="display:none"></div>
         </div>
       </section>
 
