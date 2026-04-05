@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -160,7 +161,6 @@ class UserGuidesService:
         scheduling_keywords = re.compile(
             r"\b(meet|meeting|schedule|call|sync|available|free|time|slot)\b", re.I
         )
-        import re as re_module
 
         relevant_emails = [
             e
@@ -212,11 +212,9 @@ class UserGuidesService:
         if not self._llm or not sent_emails:
             return ""
 
-        import re as re_module
-
-        scheduling_keywords = re_module.compile(
+        scheduling_keywords = re.compile(
             r"\b(meet|meeting|schedule|call|sync|available|free|time|slot)\b",
-            re_module.I,
+            re.I,
         )
 
         # Sample scheduling-related sent emails
