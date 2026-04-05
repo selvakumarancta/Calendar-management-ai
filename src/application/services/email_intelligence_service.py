@@ -1,10 +1,14 @@
 """
-Email Intelligence Service — analyzes emails and creates calendar suggestions.
-This is the core application service that orchestrates:
-1. Fetching emails from Gmail/Outlook providers
-2. LLM-powered analysis to detect meetings, tasks, appointments
-3. Calendar availability checking
-4. Creating schedule suggestions for user approval or auto-scheduling
+Email Intelligence Service — analyzes emails and creates calendar suggestions
+plus Gmail draft replies.
+
+Enhanced with capabilities from Fergana-Labs/scheduled:
+1. Thread-aware processing — reads full thread before composing draft
+2. LLM-first classification — rich intent detection with sales filter
+3. Gmail draft reply writing — composes replies in user's drafts folder
+4. Calendar invite proposal — proposes invites only after user confirms
+5. Personalized guide injection — scheduling preferences + email style
+6. Autopilot mode — auto-sends replies for 1:1 meetings when configured
 """
 
 from __future__ import annotations
@@ -29,25 +33,210 @@ from src.domain.entities.email_message import (
 logger = logging.getLogger("calendar_agent.email_intelligence")
 
 # ---------------------------------------------------------------------------
-# Deterministic shortcuts — bypass LLM for obvious patterns
+# Deterministic fast-path patterns (zero LLM cost)
 # ---------------------------------------------------------------------------
 
 _MEETING_PATTERNS = [
     re.compile(r"(?:zoom|teams|meet|webex)\s+(?:meeting|call)", re.I),
     re.compile(r"(?:join|attend)\s+(?:the\s+)?(?:meeting|call|session)", re.I),
     re.compile(r"(?:invite|invitation)\s+(?:to|for)\s+", re.I),
-    re.compile(
-        r"(?:scheduled|rescheduled)\s+(?:a\s+)?(?:meeting|call|appointment)", re.I
-    ),
+    re.compile(r"(?:scheduled|rescheduled)\s+(?:a\s+)?(?:meeting|call|appointment)", re.I),
     re.compile(r"(?:standup|stand-up|sync|1:1|one-on-one)", re.I),
     re.compile(r"let(?:'s| us)\s+(?:meet|schedule|set up|arrange)", re.I),
     re.compile(r"(?:please|can you)\s+(?:schedule|book|arrange|set up)", re.I),
-    # Broader patterns — catch simple meeting subjects
     re.compile(r"^meeting\b", re.I),
     re.compile(r"\bmeeting\s+(?:with|about|for|on|at|re:)", re.I),
     re.compile(r"(?:team|project|client|weekly|daily|monthly)\s+meeting", re.I),
     re.compile(r"\binvitation\b", re.I),
-    re.compile(r"\bnotification:\s+.*@", re.I),  # Google Calendar notifications
+    re.compile(r"\bnotification:\s+.*@", re.I),
+    re.compile(r"\bcalendar\s+(?:event|invite|notification)", re.I),
+    re.compile(r"\b(?:accepted|declined|tentative):\s+", re.I),
+    re.compile(r"(?:meeting|event|call)\s+(?:reminder|update|changed)", re.I),
+    re.compile(r"\bconference\b|\bwebinar\b|\bdemo\b|\binterview\b", re.I),
+    re.compile(r"(?:appointment|booking)\s+(?:confirmation|reminder)", re.I),
+]
+
+_CANCEL_PATTERNS = [
+    re.compile(r"(?:cancel|cancelled|canceled)\s+(?:the\s+)?(?:meeting|call|event)", re.I),
+    re.compile(r"(?:meeting|call|event)\s+(?:has been\s+)?(?:cancel)", re.I),
+]
+
+_DEADLINE_PATTERNS = [
+    re.compile(r"(?:deadline|due date|due by|submit by|deliver by)", re.I),
+    re.compile(r"(?:urgent|asap|immediately|by end of day|by eod|by cob)", re.I),
+]
+
+# Automated/notification patterns that should NOT trigger drafts
+_AUTOMATED_PATTERNS = [
+    re.compile(r"calendar-notification@google\.com", re.I),
+    re.compile(r"no.?reply@", re.I),
+    re.compile(r"noreply@", re.I),
+    re.compile(r"(?:automated|auto-generated|do not reply)", re.I),
+    re.compile(r"(?:going:\s+yes|going:\s+no|going:\s+maybe)", re.I),
+    re.compile(r"has invited you to the following event", re.I),
+    re.compile(r"(?:booking|reservation)\s+confirmation", re.I),
+    re.compile(r"calendly|cal\.com|doodle\.com", re.I),
+]
+
+# Cold outreach / sales patterns — skip drafting
+_SALES_PATTERNS = [
+    re.compile(r"(?:sales|demo|pitch|proposal|partnership)\s+(?:call|meeting|opportunity)", re.I),
+    re.compile(r"(?:would love to)\s+(?:connect|chat|discuss|show you)", re.I),
+    re.compile(r"(?:15|30)\s+min(?:utes?)?\s+(?:call|chat|intro)", re.I),
+    re.compile(r"(?:investor|VC|venture capital|fundraising)", re.I),
+    re.compile(r"(?:unsubscribe|opt.?out)", re.I),
+]
+
+_TIME_PATTERNS = [
+    re.compile(r"(\d{1,2}):(\d{2})\s*(am|pm|AM|PM)", re.I),
+    re.compile(r"(\d{1,2})\s*(am|pm|AM|PM)", re.I),
+    re.compile(r"at\s+(\d{1,2}(?::\d{2})?)\s*(?:am|pm|AM|PM)?", re.I),
+]
+
+_DATE_PATTERNS = [
+    re.compile(r"(today|tomorrow|day after tomorrow)", re.I),
+    re.compile(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)", re.I),
+    re.compile(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", re.I),
+    re.compile(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})", re.I),
+]
+
+# ---------------------------------------------------------------------------
+# LLM classification prompt — enhanced with thread context + sales detection
+# Inspired by Fergana-Labs/scheduled intent.py
+# ---------------------------------------------------------------------------
+
+_CLASSIFY_PROMPT = """You are a classifier that decides whether an email needs a scheduling draft reply.
+
+{user_line}
+Given an email subject, body, sender, and thread history, decide:
+Does this email need the user to take a scheduling action (propose times, accept/decline, reschedule, etc.)?
+If yes, intent is "needs_draft". If no, intent is "doesnt_need_draft".
+
+Focus on the LATEST message, but use thread history to understand context.
+
+needs_draft examples:
+- Someone requests a meeting in a personal email
+- Someone proposes specific times for a meeting
+- Someone confirms a time (user may need to send a calendar invite or acknowledge)
+- Someone cancels or reschedules (user may need to propose new times)
+
+doesnt_need_draft examples:
+- Email is not about scheduling at all
+- Newsletters, product updates, marketing emails
+- Multi-day events (conferences, retreats, offsites)
+- Group announcements addressed to many people
+- Automated calendar notifications (Google Calendar reminders, event updates)
+- Automated calendar invites ("has invited you to the following event")
+- Booking confirmations from scheduling tools (Calendly, Cal.com, Zoom) — meeting already booked
+- Any system-generated email about a meeting that was already scheduled
+
+You MUST respond with a single JSON object only, no prose:
+{{
+  "intent": "needs_draft" | "doesnt_need_draft",
+  "confidence": 0.0-1.0,
+  "summary": "one-line summary",
+  "proposed_times": ["list of time strings mentioned"],
+  "participants": ["sender email", "any CC emails"],
+  "duration_minutes": null or integer,
+  "is_sales_email": boolean,
+  "category": "meeting_request|meeting_reschedule|meeting_cancellation|follow_up|non_actionable"
+}}
+
+is_sales_email: true if UNSOLICITED COLD OUTREACH — sales pitches, product demos, partnership proposals,
+investor/VC intros, fundraising outreach, recruiting cold emails, or any email where a stranger is trying
+to get a meeting without a prior relationship. Do NOT flag replies to the user's own outreach.
+
+Today's date: {today}
+"""
+
+# ---------------------------------------------------------------------------
+# Draft composition prompt — thread-aware, guide-personalized
+# Inspired by Fergana-Labs/scheduled drafts/composer.py — enhanced with
+# multi-provider support and availability conflict awareness.
+# ---------------------------------------------------------------------------
+
+_DRAFT_COMPOSE_PROMPT = """You are a scheduling draft composer. Your job is to read the email thread,
+check the user's calendar availability, and compose a natural-sounding draft reply.
+
+## Scheduling Preferences
+{scheduling_preferences}
+
+## Email Style Guide
+{email_style}
+
+## User Identity
+You are composing on behalf of: {user_email}
+Timezone: {user_timezone}
+
+## Tone & Etiquette
+- Never re-suggest times that were already declined or said to not work in the thread.
+- Be warm, friendly, and accommodating — never passive-aggressive.
+- Don't express frustration about scheduling difficulty.
+- Avoid "as I mentioned", "per my last email", "let's try this again".
+- Be understanding when people can't make certain times.
+
+Today's date: {today}
+
+## Thread History (oldest first)
+{thread_history}
+
+## Latest Email (classify/reply to this)
+From: {sender}
+Subject: {subject}
+Body:
+{body}
+
+## User's Available Slots (next 14 days)
+{available_slots}
+
+## Task
+Write a concise, natural reply that:
+1. Acknowledges the request appropriately
+2. Proposes 2-3 concrete meeting times FROM the available slots above (with timezone)
+3. Matches the user's email style
+4. NEVER proposes a time that was declined in the thread history
+5. If the thread shows a time was confirmed but no invite sent, draft a confirmation
+
+Reply ONLY with the email body text — no subject line, no "Dear X:", just the reply body.
+"""
+
+# ---------------------------------------------------------------------------
+# Calendar invite verification prompt (3-layer safety like Fergana-Labs)
+# ---------------------------------------------------------------------------
+
+_INVITE_VERIFY_PROMPT = """You are verifying whether a sent email confirms a proposed calendar invite.
+
+PENDING INVITE:
+  Attendees: {attendees}
+  Summary: {event_summary}
+  Start: {event_start}
+  End: {event_end}
+  Location: {location}
+
+THREAD HISTORY:
+{thread_history}
+
+SENT MESSAGE (from {sender}):
+{sent_message}
+
+Decide: does the sent message confirm, modify, or cancel the proposed meeting?
+
+Return ONLY a JSON object:
+{{
+  "action": "send" | "update" | "skip",
+  "reason": "explanation",
+  "updated_attendee_emails": null or ["list"],
+  "updated_event_summary": null or "string",
+  "updated_event_start": null or "ISO8601",
+  "updated_event_end": null or "ISO8601"
+}}
+
+- "send": sent message confirms the meeting as proposed.
+- "update": sent message confirms but details changed. Populate updated_* fields.
+- "skip": sent message declines, cancels, or does not confirm. Do NOT send invite.
+
+Be conservative: if ambiguous, choose skip. Never send an unwanted invite.
+"""
     re.compile(r"\bcalendar\s+(?:event|invite|notification)", re.I),
     re.compile(r"\b(?:accepted|declined|tentative):\s+", re.I),  # RSVP replies
     re.compile(r"(?:meeting|event|call)\s+(?:reminder|update|changed)", re.I),
@@ -125,10 +314,16 @@ class EmailIntelligenceService:
         llm_adapter: Any = None,
         calendar_adapter: Any = None,
         db_session_factory: Any = None,
+        classifier_service: Any = None,
+        draft_composer_service: Any = None,
+        guides_service: Any = None,
     ) -> None:
         self._llm = llm_adapter
         self._calendar = calendar_adapter
         self._db_session_factory = db_session_factory
+        self._classifier = classifier_service
+        self._draft_composer = draft_composer_service
+        self._guides_service = guides_service
 
     async def scan_user_emails(
         self,
@@ -138,10 +333,23 @@ class EmailIntelligenceService:
         org_id: uuid.UUID | None = None,
         since_hours: int = 24,
         max_emails: int = 30,
+        user_email: str = "",
+        user_timezone: str = "UTC",
+        autopilot: bool = False,
     ) -> EmailScanResult:
-        """Scan a user's inbox and create schedule suggestions.
+        """Scan a user's inbox and create schedule suggestions + draft replies.
 
         This is the main entry point for email intelligence.
+
+        Flow (enhanced):
+          1. Fetch recent emails
+          2. Filter already-processed
+          3. For each email:
+             a. LLM classifier (EmailClassifierService) → intent + sales filter
+             b. If IGNORE or DOESNT_NEED_DRAFT+is_sales → skip
+             c. If NEEDS_DRAFT → DraftComposerService.compose_draft()
+             d. Else → legacy analyze_email() path (fallback)
+          4. Log the scan
         """
         since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
         result = EmailScanResult(user_id=user_id, provider=provider_name)
@@ -162,16 +370,104 @@ class EmailIntelligenceService:
             # 2. Filter already-processed emails
             emails = await self._filter_processed(user_id, emails)
 
-            # 3. Analyze each email and store it
+            # 3. Load user guides once for the session
+            scheduling_guide: str = ""
+            style_guide: str = ""
+            if self._guides_service:
+                try:
+                    scheduling_guide, style_guide = await self._guides_service.get_user_guides(user_id)
+                except Exception as e:
+                    logger.debug("Could not load user guides: %s", e)
+
+            # 4. Analyze each email
             for email in emails:
                 try:
-                    analysis = await self.analyze_email(email)
                     suggestion = None
+
+                    # ---- Try new LLM classifier path first ----
+                    if self._classifier:
+                        from src.application.services.email_classifier_service import (
+                            ClassificationRequest,
+                        )
+                        from src.domain.entities.email_message import ClassificationIntent
+
+                        clf_request = ClassificationRequest(
+                            email=email,
+                            user_email=user_email,
+                        )
+                        clf_response = await self._classifier.classify_email(clf_request)
+
+                        # Skip sales cold outreach completely
+                        if clf_response.is_sales_email:
+                            logger.debug("Skipping sales email: '%s'", email.subject)
+                            await self._save_scanned_email(
+                                email=email,
+                                analysis=EmailAnalysis(
+                                    email_id=email.id,
+                                    category=EmailCategory.NON_ACTIONABLE,
+                                    is_actionable=False,
+                                    summary="Skipped: sales/cold outreach email",
+                                ),
+                                user_id=user_id,
+                                suggestion_id=None,
+                            )
+                            continue
+
+                        # Skip emails that don't need a draft
+                        if clf_response.intent == ClassificationIntent.IGNORE:
+                            logger.debug("Ignoring email: '%s'", email.subject)
+                            continue
+
+                        if (
+                            clf_response.intent == ClassificationIntent.NEEDS_DRAFT
+                            and self._draft_composer
+                        ):
+                            result.actionable_found += 1
+                            try:
+                                from src.application.services.user_guides_service import UserSchedulingGuide, UserStyleGuide
+                                draft = await self._draft_composer.compose_draft(
+                                    user_id=user_id,
+                                    email=email,
+                                    classification=clf_response,
+                                    email_provider=email_provider,
+                                    user_guide=scheduling_guide or None,
+                                    style_guide=style_guide or None,
+                                    autopilot=autopilot,
+                                )
+                                if draft:
+                                    result.suggestions_created += 1
+                                    logger.info(
+                                        "Draft composed for '%s' (thread %s)",
+                                        email.subject,
+                                        email.thread_id,
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    "Draft composer failed for '%s': %s", email.subject, e
+                                )
+                            await self._save_scanned_email(
+                                email=email,
+                                analysis=EmailAnalysis(
+                                    email_id=email.id,
+                                    category=EmailCategory.MEETING_REQUEST,
+                                    is_actionable=True,
+                                    confidence=clf_response.confidence,
+                                    summary=clf_response.summary,
+                                ),
+                                user_id=user_id,
+                                suggestion_id=None,
+                            )
+                            continue
+
+                        # DOESNT_NEED_DRAFT path: fall through to legacy analysis
+                        # (legacy path handles calendar invites, reminders, etc.)
+
+                    # ---- Legacy analysis path (regex + LLM) ----
+                    analysis = await self.analyze_email(email)
 
                     if analysis.is_actionable:
                         result.actionable_found += 1
 
-                        # 4. Create a schedule suggestion
                         suggestion = await self._create_suggestion(
                             email=email,
                             analysis=analysis,
@@ -181,13 +477,13 @@ class EmailIntelligenceService:
                         if suggestion:
                             result.suggestions_created += 1
 
-                    # 5. Store the scanned email for browsing
                     await self._save_scanned_email(
                         email=email,
                         analysis=analysis,
                         user_id=user_id,
                         suggestion_id=suggestion.id if suggestion else None,
                     )
+
 
                 except Exception as e:
                     logger.warning("Failed to analyze email %s: %s", email.subject, e)

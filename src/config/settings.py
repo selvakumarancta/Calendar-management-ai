@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     email_scan_window_hours: int = 72
     email_scan_initial_hours: int = 72
 
+    # --- Scheduling Links ---
+    app_base_url: str = "http://localhost:8000"
+    scheduling_link_expiry_days: int = 7
+
+    # --- Autopilot ---
+    autopilot_confidence_threshold: float = 0.85
+
     # --- Stripe ---
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

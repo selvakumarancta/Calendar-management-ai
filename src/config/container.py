@@ -217,6 +217,109 @@ class Container:
             )
         return self._instances["calendar_agent"]
 
+    def email_classifier(self):  # type: ignore[no-untyped-def]
+        """Lazy-init email classifier service."""
+        if "email_classifier" not in self._instances:
+            from src.application.services.email_classifier_service import (
+                EmailClassifierService,
+            )
+
+            self._instances["email_classifier"] = EmailClassifierService(
+                llm_adapter=self.llm_adapter(),
+            )
+        return self._instances["email_classifier"]
+
+    def draft_composer(self):  # type: ignore[no-untyped-def]
+        """Lazy-init draft composer service."""
+        if "draft_composer" not in self._instances:
+            from src.application.services.draft_composer_service import (
+                DraftComposerService,
+            )
+
+            db = self.database()
+            self._instances["draft_composer"] = DraftComposerService(
+                llm_adapter=self.llm_adapter(),
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+                user_timezone=self._settings.agent_default_timezone,
+                working_hours_start=self._settings.agent_working_hours_start,
+                working_hours_end=self._settings.agent_working_hours_end,
+            )
+        return self._instances["draft_composer"]
+
+    def user_guides_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init user guides service."""
+        if "user_guides_service" not in self._instances:
+            from src.application.services.user_guides_service import UserGuidesService
+
+            db = self.database()
+            self._instances["user_guides_service"] = UserGuidesService(
+                llm_adapter=self.llm_adapter(),
+                db_session_factory=db.session_factory,
+            )
+        return self._instances["user_guides_service"]
+
+    def onboarding_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init onboarding service."""
+        if "onboarding_service" not in self._instances:
+            from src.application.services.onboarding_service import OnboardingService
+
+            db = self.database()
+            self._instances["onboarding_service"] = OnboardingService(
+                llm_adapter=self.llm_adapter(),
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+                lookback_days=60,
+            )
+        return self._instances["onboarding_service"]
+
+    def scheduling_link_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init scheduling link service."""
+        if "scheduling_link_service" not in self._instances:
+            from src.application.services.scheduling_link_service import (
+                SchedulingLinkService,
+            )
+
+            db = self.database()
+            self._instances["scheduling_link_service"] = SchedulingLinkService(
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+                base_url=self._settings.app_base_url,
+                link_expiry_days=self._settings.scheduling_link_expiry_days,
+            )
+        return self._instances["scheduling_link_service"]
+
+    def message_hook_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init message hook service."""
+        if "message_hook_service" not in self._instances:
+            from src.application.services.message_hook_service import (
+                MessageHookService,
+            )
+
+            db = self.database()
+            self._instances["message_hook_service"] = MessageHookService(
+                llm_adapter=self.llm_adapter(),
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+                auto_create_threshold=self._settings.autopilot_confidence_threshold,
+            )
+        return self._instances["message_hook_service"]
+
+    def invite_verification_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init invite verification service."""
+        if "invite_verification_service" not in self._instances:
+            from src.application.services.invite_verification_service import (
+                InviteVerificationService,
+            )
+
+            db = self.database()
+            self._instances["invite_verification_service"] = InviteVerificationService(
+                llm_adapter=self.llm_adapter(),
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+            )
+        return self._instances["invite_verification_service"]
+
     async def shutdown(self) -> None:
         """Clean up all resources."""
         db = self._instances.get("database")

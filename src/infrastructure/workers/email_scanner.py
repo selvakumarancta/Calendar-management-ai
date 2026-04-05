@@ -25,8 +25,12 @@ class EmailScannerWorker:
     ) -> None:
         self._container = container
         self._interval = scan_interval_minutes * 60  # Convert to seconds
-        self._scan_window_hours = scan_window_hours  # How far back each routine scan looks
-        self._initial_scan_hours = initial_scan_hours  # How far back the very first scan looks
+        self._scan_window_hours = (
+            scan_window_hours  # How far back each routine scan looks
+        )
+        self._initial_scan_hours = (
+            initial_scan_hours  # How far back the very first scan looks
+        )
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._running = False
 
@@ -56,7 +60,9 @@ class EmailScannerWorker:
         first_run = True
         while self._running:
             try:
-                hours = self._initial_scan_hours if first_run else self._scan_window_hours
+                hours = (
+                    self._initial_scan_hours if first_run else self._scan_window_hours
+                )
                 await self._scan_all_users(since_hours=hours)
                 first_run = False
             except Exception as e:
@@ -156,7 +162,9 @@ class EmailScannerWorker:
         )
 
         # Scan — use the configured window (default 72h to avoid missing older emails)
-        effective_hours = since_hours if since_hours is not None else self._scan_window_hours
+        effective_hours = (
+            since_hours if since_hours is not None else self._scan_window_hours
+        )
         result = await service.scan_user_emails(
             user_id=user_id,
             email_provider=email_adapter,

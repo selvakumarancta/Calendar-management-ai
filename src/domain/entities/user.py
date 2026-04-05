@@ -42,6 +42,13 @@ class User:
     stripe_customer_id: str | None = None
     stripe_subscription_id: str | None = None
 
+    # Email intelligence settings
+    autopilot_enabled: bool = False          # Auto-send draft replies for 1:1 meetings
+    scheduling_calendar_id: str | None = None  # Dedicated calendar ID (not primary)
+    branding_enabled: bool = True            # Show "Sent by CalendarAgent" footer
+    email_style_guide: str = ""              # AI-generated email style preferences
+    scheduling_preferences_guide: str = ""  # AI-generated scheduling preference guide
+
     def has_valid_google_token(self) -> bool:
         """Check if Google OAuth token is still valid."""
         if not self.google_access_token or not self.google_token_expiry:
