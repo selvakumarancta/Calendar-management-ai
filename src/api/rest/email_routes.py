@@ -26,7 +26,7 @@ email_router = APIRouter()
 class ScanRequest(BaseModel):
     provider: str = Field(default="google", description="google or microsoft")
     since_hours: int = Field(
-        default=24, ge=1, le=168, description="How many hours back to scan"
+        default=72, ge=1, le=168, description="How many hours back to scan"
     )
     max_emails: int = Field(default=30, ge=1, le=100)
 

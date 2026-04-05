@@ -20,9 +20,13 @@ class EmailScannerWorker:
         self,
         container: Any,
         scan_interval_minutes: int = 15,
+        scan_window_hours: int = 72,
+        initial_scan_hours: int = 72,
     ) -> None:
         self._container = container
         self._interval = scan_interval_minutes * 60  # Convert to seconds
+        self._scan_window_hours = scan_window_hours  # How far back each routine scan looks
+        self._initial_scan_hours = initial_scan_hours  # How far back the very first scan looks
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._running = False
 
@@ -48,19 +52,26 @@ class EmailScannerWorker:
         # Wait before first scan to let the app fully start
         await asyncio.sleep(30)
 
+        # First run: use the initial_scan_hours window to catch emails missed before startup
+        first_run = True
         while self._running:
             try:
-                await self._scan_all_users()
+                hours = self._initial_scan_hours if first_run else self._scan_window_hours
+                await self._scan_all_users(since_hours=hours)
+                first_run = False
             except Exception as e:
                 logger.error("Email scanner error: %s", e)
 
             await asyncio.sleep(self._interval)
 
-    async def _scan_all_users(self) -> None:
+    async def _scan_all_users(self, since_hours: int | None = None) -> None:
         """Scan emails for all users with active provider connections."""
         from sqlalchemy import select
 
         from src.infrastructure.persistence.org_models import ProviderConnectionModel
+
+        if since_hours is None:
+            since_hours = self._scan_window_hours
 
         db = self._container.database()
 
@@ -80,7 +91,11 @@ class EmailScannerWorker:
             logger.debug("No active email connections to scan")
             return
 
-        logger.info("Scanning emails for %d active connections", len(connections))
+        logger.info(
+            "Scanning emails for %d active connections (window=%dh)",
+            len(connections),
+            since_hours,
+        )
 
         for conn in connections:
             try:
@@ -88,6 +103,7 @@ class EmailScannerWorker:
                     user_id=conn.user_id,
                     org_id=conn.org_id,
                     provider=conn.provider,
+                    since_hours=since_hours,
                 )
             except Exception as e:
                 logger.warning(
@@ -102,6 +118,7 @@ class EmailScannerWorker:
         user_id: Any,
         org_id: Any,
         provider: str,
+        since_hours: int | None = None,
     ) -> None:
         """Scan a single user's provider for new emails."""
         from src.application.services.email_intelligence_service import (
@@ -138,13 +155,14 @@ class EmailScannerWorker:
             db_session_factory=db.session_factory,
         )
 
-        # Scan — look back 24 hours by default
+        # Scan — use the configured window (default 72h to avoid missing older emails)
+        effective_hours = since_hours if since_hours is not None else self._scan_window_hours
         result = await service.scan_user_emails(
             user_id=user_id,
             email_provider=email_adapter,
             provider_name=provider,
             org_id=org_id,
-            since_hours=24,
+            since_hours=effective_hours,
         )
 
         if result.suggestions_created > 0:
