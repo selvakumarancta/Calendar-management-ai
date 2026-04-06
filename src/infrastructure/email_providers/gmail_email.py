@@ -193,19 +193,27 @@ class GmailEmailAdapter(EmailProviderPort):
             if query:
                 search_parts.append(query)
             else:
-                # Broad search: scheduling keywords OR known senders + NOT bulk mail
+                # Only scan scheduling/task/calendar-related emails.
+                # Explicitly exclude transaction, promotional, and social mail.
                 search_parts.append(
                     "("
-                    "subject:(meeting OR schedule OR appointment OR invite OR "
-                    "calendar OR call OR sync OR standup OR review OR deadline OR "
+                    "subject:(meeting OR schedule OR appointment OR invite OR invitation OR "
+                    "calendar OR call OR sync OR standup OR stand-up OR review OR deadline OR "
                     "task OR agenda OR conference OR webinar OR demo OR interview OR "
-                    "catch OR connect OR discuss OR talk OR availability OR "
-                    "reschedule OR confirm OR follow OR followup)"
+                    "catch-up OR \"catch up\" OR connect OR discuss OR availability OR "
+                    "reschedule OR confirm OR \"follow up\" OR followup OR reminder OR "
+                    "\"action required\" OR \"please attend\" OR rsvp)"
                     " OR from:calendar-notification@google.com"
                     " OR from:noreply@google.com"
-                    " OR label:inbox"
                     ")"
-                    " -label:promotions -label:social -unsubscribe"
+                    " -label:promotions"
+                    " -label:social"
+                    " -category:promotions"
+                    " -category:social"
+                    " -subject:(transaction OR receipt OR invoice OR payment OR order OR "
+                    "\"bank statement\" OR \"account statement\" OR OTP OR statement OR "
+                    "\"your order\" OR shipping OR delivery OR \"password reset\" OR "
+                    "newsletter OR unsubscribe OR \"special offer\" OR discount OR sale)"
                 )
 
             search_query = " ".join(search_parts)
