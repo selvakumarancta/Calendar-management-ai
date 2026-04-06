@@ -469,68 +469,78 @@ async function loadEvents() {
     list.innerHTML = Object.entries(groups).map(([day, evts]) => `
       <div class="day-group">
         <div class="day-label">${day}</div>
-        ${evts.map((ev, idx) => {
+        ${evts.map((ev) => {
           const start = new Date(toUtc(ev.start_time));
           const end   = new Date(toUtc(ev.end_time));
           const duration = Math.round((end - start) / 60000);
           const durationStr = duration >= 60
             ? `${Math.floor(duration/60)}h${duration%60 ? ` ${duration%60}m` : ''}`
             : `${duration}m`;
-          const statusCls = { confirmed: 'status-confirmed', tentative: 'status-tentative', cancelled: 'status-cancelled' }[ev.status] || 'status-confirmed';
-          const organizer = (ev.attendees || []).find(a => a.includes('(organizer)'));
-          const attendeeList = (ev.attendees || []).filter(a => !a.includes('(organizer)'));
+          const status = (ev.status || 'confirmed').toLowerCase();
+          const statusCls = { confirmed: 'status-confirmed', tentative: 'status-tentative', cancelled: 'status-cancelled' }[status] || 'status-confirmed';
+          const timeRange = `${start.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})} – ${end.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}`;
+          const fullDate = start.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+          const attendees = ev.attendees || [];
+          const organizer = attendees.find(a => a.includes('(organizer)'));
+          const allAttendees = attendees.filter(a => !a.includes('(organizer)'));
+          const attendeeCountLabel = attendees.length > 0 ? `${attendees.length} attendee${attendees.length > 1 ? 's' : ''}` : '';
           return `
-          <div class="event-card ev-card-v2" onclick="toggleEvDetail(this)">
+          <div class="event-card ev-card-v2 ev-s-${status}" onclick="toggleEvDetail(this)">
             <div class="ev-main">
               <div class="ev-accent-bar"></div>
               <div class="ev-body">
                 <div class="ev-header-row">
                   <span class="ev-title">${esc(ev.title)}</span>
-                  <span class="ev-badge ${statusCls}">${ev.status || 'confirmed'}</span>
+                  <div class="ev-header-right">
+                    <span class="ev-badge ${statusCls}">${status}</span>
+                    <span class="ev-chevron">›</span>
+                  </div>
                 </div>
                 <div class="ev-time-row">
-                  <span class="ev-icon">🕐</span>
-                  <span class="ev-time-text">
-                    ${start.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-                    &nbsp;→&nbsp;
-                    ${end.toLocaleString(undefined,{hour:'2-digit',minute:'2-digit'})}
-                    <span class="ev-duration">${durationStr}</span>
-                  </span>
+                  <span class="ev-time-icon">🕐</span>
+                  <span class="ev-time-main">${timeRange}</span>
+                  <span class="ev-dur-pill">${durationStr}</span>
                 </div>
-                ${ev.location ? `<div class="ev-detail-row"><span class="ev-icon">📍</span><span class="ev-detail-text">${esc(ev.location)}</span></div>` : ''}
+                ${ev.location ? `<div class="ev-loc-row">📍 ${esc(ev.location)}</div>` : ''}
+                ${attendeeCountLabel ? `<div class="ev-att-preview">👥 ${attendeeCountLabel}</div>` : ''}
               </div>
-              <span class="ev-chevron">▸</span>
             </div>
             <div class="ev-expanded" style="display:none">
               ${ev.description ? `
-              <div class="ev-section">
-                <div class="ev-section-label">Description</div>
-                <div class="ev-section-value ev-description">${esc(ev.description)}</div>
+              <div class="ev-exp-section">
+                <div class="ev-exp-label">Description</div>
+                <div class="ev-exp-desc">${esc(ev.description)}</div>
               </div>` : ''}
-              <div class="ev-section-grid">
-                <div class="ev-info-block">
-                  <div class="ev-section-label">Date &amp; Time</div>
-                  <div class="ev-section-value">
-                    <strong>${start.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong><br>
-                    ${fmtTime(toUtc(ev.start_time))} — ${fmtTime(toUtc(ev.end_time))} &nbsp;<span class="ev-duration">(${durationStr})</span>
+              <div class="ev-exp-info-grid">
+                <div class="ev-exp-cell">
+                  <div class="ev-exp-label">Date &amp; Time</div>
+                  <div class="ev-exp-val">
+                    <strong>${fullDate}</strong><br>
+                    ${timeRange} <span class="ev-dur-pill">${durationStr}</span>
                   </div>
                 </div>
                 ${ev.location ? `
-                <div class="ev-info-block">
-                  <div class="ev-section-label">Location</div>
-                  <div class="ev-section-value">${esc(ev.location)}</div>
+                <div class="ev-exp-cell">
+                  <div class="ev-exp-label">Location</div>
+                  <div class="ev-exp-val">📍 ${esc(ev.location)}</div>
+                </div>` : ''}
+                ${organizer ? `
+                <div class="ev-exp-cell">
+                  <div class="ev-exp-label">Organizer</div>
+                  <div class="ev-exp-val">🧑‍💼 ${esc(organizer.replace(' (organizer)', ''))}</div>
                 </div>` : ''}
               </div>
-              ${ev.attendees && ev.attendees.length ? `
-              <div class="ev-section">
-                <div class="ev-section-label">👥 Attendees (${ev.attendees.length})</div>
-                <div class="ev-attendees-list">
-                  ${ev.attendees.map(a => `<span class="ev-attendee-chip">${esc(a)}</span>`).join('')}
+              ${allAttendees.length ? `
+              <div class="ev-exp-section">
+                <div class="ev-exp-label">Attendees (${allAttendees.length})</div>
+                <div class="ev-attendees">
+                  ${allAttendees.map(a => `<span class="ev-att-chip">${esc(a)}</span>`).join('')}
                 </div>
               </div>` : ''}
-              <div class="ev-section ev-meta-row">
-                <span class="ev-meta-item">🆔 ${esc(ev.provider_event_id || ev.id)}</span>
-                ${ev.is_all_day ? '<span class="ev-meta-item">📅 All-day event</span>' : ''}
+              <div class="ev-exp-footer">
+                <span>🆔 ${esc(ev.provider_event_id || ev.id || '')}</span>
+                ${ev.is_all_day ? '<span>📅 All-day event</span>' : ''}
+                <span class="ev-badge ${statusCls}">${status}</span>
               </div>
             </div>
           </div>`;
@@ -791,61 +801,89 @@ function renderScannedEmailCard(email, idx) {
     task_assignment: "📋", deadline_reminder: "⏰", appointment: "📅",
     event_invitation: "🎟️", follow_up: "🔄", non_actionable: "📧",
   };
+  const categoryColors = {
+    meeting_request: "#7c3aed", meeting_reschedule: "#3b82f6",
+    meeting_cancellation: "#ef4444", task_assignment: "#f59e0b",
+    deadline_reminder: "#f59e0b", appointment: "#22c55e",
+    event_invitation: "#8b5cf6", follow_up: "#06b6d4", non_actionable: "#52525b",
+  };
   const icon = categoryIcons[email.analysis_category] || "📧";
   const categoryLabel = (email.analysis_category || "unknown").replace(/_/g, " ");
+  const categoryColor = categoryColors[email.analysis_category] || "#52525b";
   const confidence = Math.round((email.analysis_confidence || 0) * 100);
-  const receivedAt = email.received_at ? new Date(email.received_at.endsWith('Z') ? email.received_at : email.received_at + 'Z') : null;
+  const receivedAt = email.received_at
+    ? new Date(email.received_at.endsWith('Z') ? email.received_at : email.received_at + 'Z')
+    : null;
   const timeAgo = receivedAt ? fmtRelativeTime(email.received_at) : "";
   const timeAbsolute = receivedAt ? receivedAt.toLocaleString(undefined, {
     weekday: "short", year: "numeric", month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit"
   }) : "";
 
-  // Build the display name: "First Last" or fall back to email address
-  const displayName = email.sender_name
-    ? `<span class="em-from-name">${esc(email.sender_name)}</span> <span class="em-from-addr">&lt;${esc(email.sender_email)}&gt;</span>`
-    : `<span class="em-from-name">${esc(email.sender_email)}</span>`;
-
+  // Avatar: first letter of sender name or email
+  const displayName = email.sender_name || email.sender_email || "?";
+  const avatarLetter = displayName[0].toUpperCase();
   const recipientList = (email.recipients || []).slice(0, 5).join(", ");
-
-  // Body preview — first 200 chars of body_text or snippet
-  const bodyPreview = (email.body_snippet || email.body_text || "").slice(0, 200).trim();
+  const bodyPreview = (email.body_snippet || email.body_text || "").slice(0, 180).trim();
 
   return `
     <div class="em-card ${email.is_actionable ? 'em-actionable' : ''}" onclick="toggleEmailDetail(${idx})">
       <div class="em-card-header">
-        <div class="em-left">
-          <span class="em-icon">${icon}</span>
-          <div class="em-info">
-            <div class="em-subject">${esc(email.subject || '(no subject)')}</div>
-            <div class="em-from">${displayName}</div>
-            ${bodyPreview ? `<div class="em-preview">${esc(bodyPreview)}</div>` : ''}
+        <div class="em-avatar" style="background:${categoryColor}">${avatarLetter}</div>
+        <div class="em-info">
+          <div class="em-subject-row">
+            <span class="em-subject">${esc(email.subject || '(no subject)')}</span>
+            <span class="em-chevron" id="chevron-email-${idx}">›</span>
           </div>
+          <div class="em-sender-row">
+            <span class="em-from-name">${esc(email.sender_name || email.sender_email)}</span>
+            ${email.sender_name ? `<span class="em-from-addr">&lt;${esc(email.sender_email)}&gt;</span>` : ''}
+            <span class="em-sep">·</span>
+            <span class="em-time-ago" title="${timeAbsolute}">${timeAgo}</span>
+          </div>
+          ${bodyPreview ? `<div class="em-preview">${esc(bodyPreview)}</div>` : ''}
         </div>
-        <div class="em-right">
-          <span class="em-time" title="${timeAbsolute}">${timeAgo}</span>
+        <div class="em-badge-col">
           ${email.is_actionable
-            ? `<span class="em-badge em-badge-action">✨ ${categoryLabel}</span>`
-            : `<span class="em-badge">Not actionable</span>`
+            ? `<span class="em-badge em-badge-action">${icon} ${categoryLabel}</span>`
+            : `<span class="em-badge">📧 not actionable</span>`
           }
-          ${email.has_attachments ? '<span class="em-attachment" title="Has attachments">📎</span>' : ''}
-          <span class="em-chevron" id="chevron-email-${idx}">▸</span>
+          ${email.has_attachments ? '<span class="em-attach-icon" title="Has attachments">📎</span>' : ''}
         </div>
       </div>
-
       <div class="em-detail" id="email-detail-${idx}" style="display:none">
-        <div class="em-detail-section em-detail-meta">
-          <div class="em-meta-row"><span class="em-meta-label">From</span><span class="em-meta-val">${email.sender_name ? `<strong>${esc(email.sender_name)}</strong> &lt;${esc(email.sender_email)}&gt;` : esc(email.sender_email)}</span></div>
-          ${recipientList ? `<div class="em-meta-row"><span class="em-meta-label">To</span><span class="em-meta-val">${esc(recipientList)}</span></div>` : ''}
-          <div class="em-meta-row"><span class="em-meta-label">Date</span><span class="em-meta-val">${timeAbsolute}</span></div>
-          <div class="em-meta-row"><span class="em-meta-label">Category</span><span class="em-meta-val">${icon} <strong>${categoryLabel}</strong>${confidence > 0 ? ` <span class="em-conf-badge">${confidence}% confidence</span>` : ''}</span></div>
-          ${email.analysis_summary ? `<div class="em-meta-row"><span class="em-meta-label">AI Summary</span><span class="em-meta-val em-summary">${esc(email.analysis_summary)}</span></div>` : ''}
-          ${email.suggestion_id ? `<div class="em-meta-row"><span class="em-meta-label">Action</span><span class="em-meta-val"><span class="em-badge em-badge-action">📋 Suggestion created — see Pending tab</span></span></div>` : ''}
+        <div class="em-meta">
+          <div class="em-meta-row">
+            <span class="em-ml">From</span>
+            <span class="em-mv">${email.sender_name
+              ? `<strong>${esc(email.sender_name)}</strong> &lt;${esc(email.sender_email)}&gt;`
+              : esc(email.sender_email)}</span>
+          </div>
+          ${recipientList ? `<div class="em-meta-row"><span class="em-ml">To</span><span class="em-mv">${esc(recipientList)}</span></div>` : ''}
+          <div class="em-meta-row">
+            <span class="em-ml">Date</span>
+            <span class="em-mv">${timeAbsolute}</span>
+          </div>
+          <div class="em-meta-row">
+            <span class="em-ml">Category</span>
+            <span class="em-mv">${icon} <strong>${categoryLabel}</strong>${confidence > 0 ? ` <span class="em-conf">${confidence}% confidence</span>` : ''}</span>
+          </div>
+          ${email.analysis_summary ? `
+          <div class="em-meta-row">
+            <span class="em-ml">AI Summary</span>
+            <span class="em-mv em-ai-summary">${esc(email.analysis_summary)}</span>
+          </div>` : ''}
+          ${email.suggestion_id ? `
+          <div class="em-meta-row">
+            <span class="em-ml">Action</span>
+            <span class="em-mv"><span class="em-badge em-badge-action">📋 Suggestion created — see Pending tab</span></span>
+          </div>` : ''}
         </div>
-        <div class="em-detail-body">
-          <div class="em-detail-body-label">📨 Email Body</div>
-          <div class="em-detail-body-text">${esc(email.body_text || email.body_snippet || '(no body available)')}</div>
-        </div>
+        ${(email.body_text || email.body_snippet) ? `
+        <div class="em-body-box">
+          <div class="em-body-label">📨 Email Body</div>
+          <div class="em-body-text">${esc(email.body_text || email.body_snippet)}</div>
+        </div>` : ''}
       </div>
     </div>
   `;
