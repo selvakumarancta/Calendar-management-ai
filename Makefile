@@ -1,7 +1,7 @@
 .PHONY: help install dev test lint format run migrate docker-up docker-down clean
 
-PYTHON := python
-PIP := pip
+PYTHON := $(shell [ -f .venv/bin/python ] && echo .venv/bin/python || echo python)
+PIP := $(shell [ -f .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -35,7 +35,7 @@ format: ## Format code
 	ruff check --fix src/ tests/
 
 run: ## Run the application locally
-	uvicorn src.api.rest.app:create_app --factory --host 0.0.0.0 --port 8000 --reload
+	$(PYTHON) -m uvicorn src.api.rest.app:app --host 0.0.0.0 --port 8000 --reload
 
 migrate-init: ## Initialize alembic
 	alembic init migrations
