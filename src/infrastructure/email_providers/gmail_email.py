@@ -126,7 +126,9 @@ class GmailEmailAdapter(EmailProviderPort):
                 await session.commit()
                 logger.info("Persisted refreshed Gmail tokens for user %s", user_id)
         except Exception as e:
-            logger.warning("Failed to persist refreshed tokens for user %s: %s", user_id, e)
+            logger.warning(
+                "Failed to persist refreshed tokens for user %s: %s", user_id, e
+            )
 
     async def _get_user_tokens(self, user_id: uuid.UUID) -> dict | None:
         """Look up Google OAuth tokens — checks provider_connections first, then users table."""
@@ -191,14 +193,19 @@ class GmailEmailAdapter(EmailProviderPort):
             if query:
                 search_parts.append(query)
             else:
+                # Broad search: scheduling keywords OR known senders + NOT bulk mail
                 search_parts.append(
                     "("
                     "subject:(meeting OR schedule OR appointment OR invite OR "
                     "calendar OR call OR sync OR standup OR review OR deadline OR "
-                    "task OR agenda OR conference OR webinar OR demo OR interview)"
+                    "task OR agenda OR conference OR webinar OR demo OR interview OR "
+                    "catch OR connect OR discuss OR talk OR availability OR "
+                    "reschedule OR confirm OR follow OR followup)"
                     " OR from:calendar-notification@google.com"
                     " OR from:noreply@google.com"
+                    " OR label:inbox"
                     ")"
+                    " -label:promotions -label:social -unsubscribe"
                 )
 
             search_query = " ".join(search_parts)

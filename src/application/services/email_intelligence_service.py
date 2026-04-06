@@ -330,6 +330,7 @@ class EmailIntelligenceService:
         user_email: str = "",
         user_timezone: str = "UTC",
         autopilot: bool = False,
+        rescan: bool = False,
     ) -> EmailScanResult:
         """Scan a user's inbox and create schedule suggestions + draft replies.
 
@@ -361,8 +362,11 @@ class EmailIntelligenceService:
             if not emails:
                 return result
 
-            # 2. Filter already-processed emails
-            emails = await self._filter_processed(user_id, emails)
+            # 2. Filter already-processed emails (skip when rescan=True)
+            if not rescan:
+                emails = await self._filter_processed(user_id, emails)
+            else:
+                logger.info("rescan=True: skipping already-processed filter for user %s", user_id)
 
             # 3. Load user guides once for the session
             scheduling_guide: str = ""
@@ -380,15 +384,11 @@ class EmailIntelligenceService:
 
                     # ---- Try new LLM classifier path first ----
                     if self._classifier:
-                        from src.application.services.email_classifier_service import (
-                            ClassificationRequest,
-                        )
-
-                        clf_request = ClassificationRequest(
-                            email=email,
+                        clf_response = await self._classifier.classify(
+                            email,
+                            thread_messages=None,
                             user_email=user_email,
                         )
-                        clf_response = await self._classifier.classify_email(clf_request)
 
                         # Skip sales cold outreach completely
                         if clf_response.is_sales_email:
@@ -408,6 +408,7 @@ class EmailIntelligenceService:
 
                         if clf_response.needs_draft and self._draft_composer:
                             result.actionable_found += 1
+                            draft = None
                             try:
                                 draft = await self._draft_composer.compose_and_create_draft(
                                     email=email,
@@ -421,7 +422,6 @@ class EmailIntelligenceService:
                                     autopilot_enabled=autopilot,
                                 )
                                 if draft:
-                                    result.suggestions_created += 1
                                     logger.info(
                                         "Draft composed for '%s' (thread %s)",
                                         email.subject,
@@ -431,12 +431,59 @@ class EmailIntelligenceService:
                                 logger.warning(
                                     "Draft composer failed for '%s': %s", email.subject, e
                                 )
+
+                            # Always create a pending suggestion for meeting emails
+                            # so the user can see and approve/reject from the UI.
+                            analysis_for_suggestion = EmailAnalysis(
+                                email_id=email.id,
+                                category=clf_response.category,
+                                is_actionable=True,
+                                confidence=clf_response.confidence,
+                                summary=clf_response.summary,
+                                suggested_title=email.subject,
+                                suggested_attendees=clf_response.participants,
+                                suggested_duration_minutes=(
+                                    clf_response.duration_minutes or 30
+                                ),
+                            )
+                            # Try to extract time from proposed_times
+                            if clf_response.proposed_times:
+                                time_text = " ".join(clf_response.proposed_times[:2])
+                                analysis_for_suggestion.suggested_time = (
+                                    self._extract_time(time_text)
+                                )
+                                analysis_for_suggestion.suggested_date = (
+                                    self._extract_date(time_text)
+                                )
+
+                            suggestion = await self._create_suggestion(
+                                email=email,
+                                analysis=analysis_for_suggestion,
+                                user_id=user_id,
+                                org_id=org_id,
+                                user_timezone=user_timezone,
+                            )
+                            if suggestion:
+                                result.suggestions_created += 1
+
+                            await self._save_scanned_email(
+                                email=email,
+                                analysis=analysis_for_suggestion,
+                                user_id=user_id,
+                                suggestion_id=suggestion.id if suggestion else None,
+                            )
+                            continue
+
+                        # needs_draft=False (but not sales): fall through to
+                        # legacy analysis for calendar invites, reminders, etc.
+                        if clf_response.already_resolved:
+                            # Thread fully resolved — save as scanned, skip suggestion
                             await self._save_scanned_email(
                                 email=email,
                                 analysis=EmailAnalysis(
                                     email_id=email.id,
-                                    category=EmailCategory.MEETING_REQUEST,
-                                    is_actionable=True,
+                                    category=clf_response.category,
+                                    is_actionable=False,
                                     confidence=clf_response.confidence,
                                     summary=clf_response.summary,
                                 ),
@@ -444,9 +491,6 @@ class EmailIntelligenceService:
                                 suggestion_id=None,
                             )
                             continue
-
-                        # needs_draft=False: fall through to legacy analysis
-                        # (handles calendar invites, reminders, etc.)
 
                     # ---- Legacy analysis path (regex + LLM) ----
                     analysis = await self.analyze_email(email)

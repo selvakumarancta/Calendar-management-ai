@@ -51,7 +51,11 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         self._in_memory.set_db_session_factory(factory)
 
     async def _get_google_tokens(self, user_id: UUID) -> dict | None:
-        """Look up real Google tokens from provider_connections for this user."""
+        """Look up real Google tokens from provider_connections for this user.
+
+        If the stored access token is expired, refreshes it automatically and
+        persists the new token back to the database.
+        """
         if not self._db_session_factory:
             return None
         try:
@@ -75,11 +79,55 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     if row.access_token and row.access_token != "dev-token":
                         from src.infrastructure.security.token_encryption import (
                             decrypt_token,
+                            encrypt_token,
                         )
 
+                        access = decrypt_token(row.access_token)
+                        refresh = decrypt_token(row.refresh_token or "")
+
+                        # Try to refresh the token to ensure it is still valid
+                        if refresh and self._google_client_id:
+                            try:
+                                from google.auth.transport.requests import Request
+                                from google.oauth2.credentials import Credentials
+
+                                creds = Credentials(
+                                    token=access,
+                                    refresh_token=refresh,
+                                    token_uri="https://oauth2.googleapis.com/token",
+                                    client_id=self._google_client_id,
+                                    client_secret=self._google_client_secret,
+                                )
+                                if not creds.valid:
+                                    import asyncio
+
+                                    await asyncio.get_event_loop().run_in_executor(
+                                        None, lambda: creds.refresh(Request())
+                                    )
+                                    if creds.token and creds.token != access:
+                                        # Persist refreshed token
+                                        row.access_token = encrypt_token(creds.token)
+                                        if creds.refresh_token:
+                                            row.refresh_token = encrypt_token(
+                                                creds.refresh_token
+                                            )
+                                        await session.commit()
+                                        access = creds.token
+                                        refresh = creds.refresh_token or refresh
+                                        logger.info(
+                                            "Refreshed Google Calendar token for user %s",
+                                            user_id,
+                                        )
+                            except Exception as ref_err:
+                                logger.warning(
+                                    "Calendar token refresh failed for user %s: %s",
+                                    user_id,
+                                    ref_err,
+                                )
+
                         return {
-                            "access_token": decrypt_token(row.access_token),
-                            "refresh_token": decrypt_token(row.refresh_token or ""),
+                            "access_token": access,
+                            "refresh_token": refresh,
                             "provider_email": row.provider_email,
                         }
         except Exception as e:
@@ -87,18 +135,23 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         return None
 
     def _build_google_service(self, tokens: dict):  # type: ignore[no-untyped-def]
-        """Build an authorized Google Calendar API service from tokens."""
+        """Build an authorized Google Calendar API service from tokens.
+
+        google-auth will automatically refresh the access token on the first
+        API call if it is expired, as long as refresh_token and client
+        credentials are present.
+        """
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
         credentials = Credentials(
             token=tokens["access_token"],
-            refresh_token=tokens.get("refresh_token"),
+            refresh_token=tokens.get("refresh_token") or None,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=self._google_client_id,
             client_secret=self._google_client_secret,
         )
-        return build("calendar", "v3", credentials=credentials)
+        return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
     # ---- CalendarProviderPort -----------------------------------------
 
@@ -135,10 +188,7 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         # Merge: prefer Google Calendar events; add local events that aren't
         # already represented (identified by provider_event_id).
         google_ids = {e.provider_event_id for e in google_events if e.provider_event_id}
-        extra_local = [
-            e for e in local_events
-            if e.provider_event_id not in google_ids
-        ]
+        extra_local = [e for e in local_events if e.provider_event_id not in google_ids]
         return google_events + extra_local
 
     async def _list_google_events(

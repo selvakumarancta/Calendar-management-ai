@@ -988,10 +988,12 @@ async function triggerEmailScan() {
   statusText.textContent = `Scanning ${provider === 'google' ? 'Gmail' : 'Outlook'} inbox for the last ${sinceHours}h...`;
 
   try {
+    const rescan = document.getElementById("email-rescan")?.checked || false;
     const result = await api("POST", "/api/v1/email/scan", {
       provider,
       since_hours: sinceHours,
       max_emails: 50,
+      rescan,
     });
 
     statusBar.className = "scan-banner success";

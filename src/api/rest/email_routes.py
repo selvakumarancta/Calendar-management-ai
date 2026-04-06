@@ -26,9 +26,13 @@ email_router = APIRouter()
 class ScanRequest(BaseModel):
     provider: str = Field(default="google", description="google or microsoft")
     since_hours: int = Field(
-        default=72, ge=1, le=168, description="How many hours back to scan"
+        default=168, ge=1, le=720, description="How many hours back to scan (default 7 days)"
     )
-    max_emails: int = Field(default=30, ge=1, le=100)
+    max_emails: int = Field(default=50, ge=1, le=200)
+    rescan: bool = Field(
+        default=False,
+        description="Re-scan emails that were already processed (use when fixing classifier bugs)",
+    )
 
 
 class SuggestionResponse(BaseModel):
@@ -121,6 +125,7 @@ async def scan_emails(
         max_emails=request.max_emails,
         user_email=getattr(current_user, "email", ""),
         user_timezone=getattr(current_user, "timezone", "UTC") or "UTC",
+        rescan=request.rescan,
     )
 
     return {
@@ -213,7 +218,9 @@ async def approve_suggestion(
         "status": "approved",
         "title": result.title,
         "calendar_event_id": result.calendar_event_id,
-        "proposed_start": result.proposed_start.isoformat() if result.proposed_start else None,
+        "proposed_start": (
+            result.proposed_start.isoformat() if result.proposed_start else None
+        ),
     }
 
 
