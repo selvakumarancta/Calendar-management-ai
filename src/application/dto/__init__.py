@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 # --- Calendar DTOs ---
 
@@ -42,8 +42,6 @@ class UpdateEventDTO(BaseModel):
 class EventResponseDTO(BaseModel):
     """Output representation of a calendar event."""
 
-    model_config = {"json_encoders": {datetime: lambda v: v.isoformat() + "Z" if v.tzinfo is None else v.isoformat()}}
-
     id: str
     provider_event_id: str | None = None
     title: str
@@ -55,6 +53,10 @@ class EventResponseDTO(BaseModel):
     status: str = "confirmed"
     attendees: list[str] = Field(default_factory=list)
     duration_minutes: int = 0
+
+    @field_serializer("start_time", "end_time")
+    def _serialize_dt(self, v: datetime) -> str:
+        return v.isoformat() + "Z" if v.tzinfo is None else v.isoformat()
 
 
 class FreeSlotDTO(BaseModel):

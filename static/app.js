@@ -1021,7 +1021,24 @@ async function approveSuggestion(id) {
     const actionsDiv = card.querySelector(".suggestion-actions");
     actionsDiv.innerHTML = `<div class="suggestion-status-badge status-approved">✅ Event Created: ${esc(result.title)}</div>`;
     await loadEmailSuggestions();
-    showToast("Event created!");
+    showToast("Event created! Switching to Calendar…");
+
+    // Navigate to Calendar tab and jump to the week containing the new event
+    if (result.proposed_start) {
+      const eventDate = new Date(result.proposed_start);
+      const now = new Date();
+      // Calculate weekOffset: how many weeks from current week to event's week
+      const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - now.getDay());
+      currentWeekStart.setHours(0, 0, 0, 0);
+      const eventWeekStart = new Date(eventDate);
+      eventWeekStart.setDate(eventDate.getDate() - eventDate.getDay());
+      eventWeekStart.setHours(0, 0, 0, 0);
+      weekOffset = Math.round((eventWeekStart - currentWeekStart) / msPerWeek);
+    }
+    switchView("calendar");
+    await loadEvents();
   } catch (e) {
     showToast("Failed to approve: " + e.message, "error");
     btns.forEach(b => b.disabled = false);

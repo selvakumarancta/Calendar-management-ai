@@ -110,11 +110,12 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         calendar_id: str = "primary",
         max_results: int = 50,
     ) -> list[CalendarEvent]:
-        """List events — try real provider first, fall back to in-memory."""
+        """List events — merge real Google Calendar events with locally-created events."""
         tokens = await self._get_google_tokens(user_id)
+        google_events: list[CalendarEvent] = []
         if tokens:
             try:
-                return await self._list_google_events(
+                google_events = await self._list_google_events(
                     tokens, user_id, start, end, calendar_id, max_results
                 )
             except Exception as e:
@@ -122,10 +123,23 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     "Google Calendar API failed, falling back to in-memory: %s", e
                 )
 
-        # Fallback: in-memory store
-        return await self._in_memory.list_events(
+        # Always also fetch locally-created events (those created via the app)
+        # so they're visible regardless of whether the Google API call succeeded.
+        local_events = await self._in_memory.list_events(
             user_id, start, end, calendar_id, max_results
         )
+
+        if not google_events:
+            return local_events
+
+        # Merge: prefer Google Calendar events; add local events that aren't
+        # already represented (identified by provider_event_id).
+        google_ids = {e.provider_event_id for e in google_events if e.provider_event_id}
+        extra_local = [
+            e for e in local_events
+            if e.provider_event_id not in google_ids
+        ]
+        return google_events + extra_local
 
     async def _list_google_events(
         self,
@@ -220,6 +234,8 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     .execute()
                 )
                 event.provider_event_id = result["id"]
+                # Also persist to local DB so it's visible via list_events fallback
+                await self._in_memory.create_event(user_id, event)
                 return event
             except Exception as e:
                 logger.warning("Failed to create Google event, using in-memory: %s", e)

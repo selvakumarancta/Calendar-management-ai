@@ -204,10 +204,16 @@ async def approve_suggestion(
     if not result:
         raise HTTPException(status_code=404, detail="Suggestion not found")
 
+    # Invalidate the calendar event cache for this user so the next
+    # list_events call returns fresh data including the newly created event.
+    cache = container.cache()
+    await cache.delete(f"events:{current_user.id}:*")
+
     return {
         "status": "approved",
         "title": result.title,
         "calendar_event_id": result.calendar_event_id,
+        "proposed_start": result.proposed_start.isoformat() if result.proposed_start else None,
     }
 
 
