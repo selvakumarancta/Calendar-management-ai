@@ -459,6 +459,7 @@ class EmailIntelligenceService:
                             analysis=analysis,
                             user_id=user_id,
                             org_id=org_id,
+                            user_timezone=user_timezone,
                         )
                         if suggestion:
                             result.suggestions_created += 1
@@ -692,16 +693,18 @@ class EmailIntelligenceService:
         analysis: EmailAnalysis,
         user_id: uuid.UUID,
         org_id: uuid.UUID | None = None,
+        user_timezone: str = "UTC",
     ) -> ScheduleSuggestion | None:
         """Create a schedule suggestion and check for conflicts."""
         now = datetime.now(timezone.utc)
 
-        # Parse proposed start/end times
+        # Parse proposed start/end times, interpreting them in user's timezone
         proposed_start, proposed_end = self._resolve_datetime(
             date_str=analysis.suggested_date,
             time_str=analysis.suggested_time,
             duration_minutes=analysis.suggested_duration_minutes,
             reference_date=now,
+            user_timezone=user_timezone,
         )
 
         suggestion = ScheduleSuggestion(
@@ -1145,26 +1148,37 @@ class EmailIntelligenceService:
         return ""
 
     @staticmethod
+    @staticmethod
     def _resolve_datetime(
         date_str: str,
         time_str: str,
         duration_minutes: int,
         reference_date: datetime,
+        user_timezone: str = "UTC",
     ) -> tuple[datetime | None, datetime | None]:
-        """Resolve date/time strings to actual datetimes."""
+        """Resolve date/time strings to actual datetimes in the user's timezone, stored as UTC."""
         if not date_str and not time_str:
             return None, None
 
-        target_date = reference_date.date()
+        # Determine target date using the user's local "now"
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_timezone)
+        except Exception:
+            from datetime import timezone as _tz
+            tz = timezone.utc
+
+        local_now = reference_date.astimezone(tz)
+        target_date = local_now.date()
 
         # Resolve relative dates
         date_lower = date_str.lower().strip()
         if date_lower == "today":
-            target_date = reference_date.date()
+            target_date = local_now.date()
         elif date_lower == "tomorrow":
-            target_date = (reference_date + timedelta(days=1)).date()
+            target_date = (local_now + timedelta(days=1)).date()
         elif date_lower == "day after tomorrow":
-            target_date = (reference_date + timedelta(days=2)).date()
+            target_date = (local_now + timedelta(days=2)).date()
         elif date_lower in (
             "monday",
             "tuesday",
@@ -1184,11 +1198,11 @@ class EmailIntelligenceService:
                 "sunday",
             ]
             target_idx = day_names.index(date_lower)
-            current_idx = reference_date.weekday()
+            current_idx = local_now.weekday()
             days_ahead = (target_idx - current_idx) % 7
             if days_ahead == 0:
                 days_ahead = 7
-            target_date = (reference_date + timedelta(days=days_ahead)).date()
+            target_date = (local_now + timedelta(days=days_ahead)).date()
         elif date_str:
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -1196,7 +1210,7 @@ class EmailIntelligenceService:
                 pass
 
         # Resolve time
-        hour, minute = 10, 0  # Default: 10 AM
+        hour, minute = 10, 0  # Default: 10 AM in user's timezone
         if time_str:
             time_clean = time_str.strip().lower()
             try:
@@ -1211,14 +1225,32 @@ class EmailIntelligenceService:
             except Exception:
                 pass
 
-        start = datetime(
-            target_date.year,
-            target_date.month,
-            target_date.day,
-            hour,
-            minute,
-            tzinfo=timezone.utc,
-        )
+        # Build as local time then convert to UTC
+        from zoneinfo import ZoneInfo as _ZI
+        try:
+            local_tz = _ZI(user_timezone)
+        except Exception:
+            local_tz = None  # type: ignore
+
+        if local_tz:
+            local_start = datetime(
+                target_date.year,
+                target_date.month,
+                target_date.day,
+                hour,
+                minute,
+                tzinfo=local_tz,
+            )
+            start = local_start.astimezone(timezone.utc)
+        else:
+            start = datetime(
+                target_date.year,
+                target_date.month,
+                target_date.day,
+                hour,
+                minute,
+                tzinfo=timezone.utc,
+            )
         end = start + timedelta(minutes=duration_minutes)
 
         return start, end

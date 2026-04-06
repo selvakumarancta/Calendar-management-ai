@@ -4,6 +4,7 @@
 
 const API = "";
 let token = null;
+let refreshToken = null;
 let ws = null;
 let conversationId = null;
 let weekOffset = 0;
@@ -14,6 +15,7 @@ let orgs = [];
 
 document.addEventListener("DOMContentLoaded", () => {
   token = localStorage.getItem("token");
+  refreshToken = localStorage.getItem("refresh_token");
   currentOrgId = localStorage.getItem("currentOrgId");
   document.getElementById("sidebar").style.display = "none";
   if (token) showApp();
@@ -45,14 +47,17 @@ async function loginDev() {
   try {
     const res = await api("POST", "/api/v1/auth/dev-login");
     token = res.access_token;
+    refreshToken = res.refresh_token || null;
     localStorage.setItem("token", token);
+    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
     showApp();
   } catch (e) { showToast("Dev login failed: " + e.message, "error"); }
 }
 
 function logout() {
-  token = null; conversationId = null; currentOrgId = null;
+  token = null; refreshToken = null; conversationId = null; currentOrgId = null;
   localStorage.removeItem("token");
+  localStorage.removeItem("refresh_token");
   localStorage.removeItem("currentOrgId");
   if (ws) { ws.close(); ws = null; }
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
@@ -1585,7 +1590,31 @@ async function api(method, path, body) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (token) opts.headers["Authorization"] = "Bearer " + token;
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(API + path, opts);
+  let res = await fetch(API + path, opts);
+
+  // Auto-refresh: try to get a new access token on 401 before giving up
+  if (res.status === 401 && refreshToken) {
+    try {
+      const refreshRes = await fetch(API + "/api/v1/auth/refresh", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + refreshToken,
+        },
+      });
+      if (refreshRes.ok) {
+        const newTokens = await refreshRes.json();
+        token = newTokens.access_token;
+        refreshToken = newTokens.refresh_token || refreshToken;
+        localStorage.setItem("token", token);
+        if (newTokens.refresh_token) localStorage.setItem("refresh_token", newTokens.refresh_token);
+        // Retry original request with new token
+        opts.headers["Authorization"] = "Bearer " + token;
+        res = await fetch(API + path, opts);
+      }
+    } catch (_) { /* fall through to logout */ }
+  }
+
   if (res.status === 401) { logout(); throw new Error("Session expired"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);

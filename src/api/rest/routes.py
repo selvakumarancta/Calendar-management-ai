@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from src.api.dependencies import get_container, get_current_user
 from src.application.dto import (
@@ -185,6 +185,7 @@ async def google_callback(
     <p>Redirecting to Calendar Agent&hellip;</p>
     <script>
       localStorage.setItem('token', '{jwt_access}');
+      localStorage.setItem('refresh_token', '{jwt_refresh}');
       window.location.href = '/';
     </script>
     <p><a href="/" style="color:#8b5cf6">Click here if not redirected</a></p>
@@ -303,6 +304,7 @@ async def microsoft_callback(
     <p>Redirecting to Calendar Agent&hellip;</p>
     <script>
       localStorage.setItem('token', '{jwt_access}');
+      localStorage.setItem('refresh_token', '{jwt_refresh}');
       window.location.href = '/';
     </script>
     <p><a href="/" style="color:#8b5cf6">Click here if not redirected</a></p>
@@ -329,6 +331,59 @@ async def get_profile(
         plan=current_user.plan.value,
         monthly_requests_used=monthly_used,
         monthly_request_limit=current_user.get_request_limit(),
+    )
+
+
+@auth_router.post("/refresh", response_model=LoginResponseDTO)
+async def refresh_token(
+    container: Container = Depends(get_container),
+    authorization: str | None = Header(default=None),
+) -> LoginResponseDTO:
+    """Exchange a valid refresh token for a new access token.
+
+    Send the refresh token as ``Authorization: Bearer <refresh_token>``.
+    """
+    from src.domain.exceptions import AuthenticationError
+    from src.infrastructure.persistence.user_repository import SQLAlchemyUserRepository
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token required",
+        )
+    raw_token = authorization[len("Bearer ") :]
+
+    jwt_svc = container.jwt_service()
+    try:
+        payload = jwt_svc.decode_token(raw_token)
+    except AuthenticationError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not a refresh token",
+        )
+
+    user_id = payload.get("sub")
+    db = container.database()
+    async with db.session_factory() as session:
+        repo = SQLAlchemyUserRepository(session)
+        user = await repo.get_by_id(UUID(user_id))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    new_access = jwt_svc.create_access_token(user)
+    new_refresh = jwt_svc.create_refresh_token(user)
+    return LoginResponseDTO(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_in=container.settings.jwt_access_token_expire_minutes * 60,
     )
 
 
