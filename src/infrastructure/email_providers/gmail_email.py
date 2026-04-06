@@ -35,11 +35,16 @@ class GmailEmailAdapter(EmailProviderPort):
         self._db_session_factory = factory
 
     async def _get_service(self, user_id: uuid.UUID) -> Any:
-        """Build an authorized Gmail API service for a user."""
+        """Build an authorized Gmail API service, auto-refreshing the token if expired."""
+        from google.auth.exceptions import RefreshError
+        from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        from src.infrastructure.security.token_encryption import decrypt_token
+        from src.infrastructure.security.token_encryption import (
+            decrypt_token,
+            encrypt_token,
+        )
 
         tokens = await self._get_user_tokens(user_id)
         if not tokens:
@@ -50,12 +55,78 @@ class GmailEmailAdapter(EmailProviderPort):
 
         credentials = Credentials(
             token=access_token,
-            refresh_token=refresh_token,
+            refresh_token=refresh_token or None,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=self._client_id,
             client_secret=self._client_secret,
         )
-        return build("gmail", "v1", credentials=credentials)
+
+        # Auto-refresh if expired or about to expire
+        if credentials.expired or not credentials.valid:
+            try:
+                import asyncio
+
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: credentials.refresh(Request())
+                )
+                # Persist refreshed tokens back to DB
+                if credentials.token and self._db_session_factory:
+                    new_enc_access = encrypt_token(credentials.token)
+                    new_enc_refresh = encrypt_token(credentials.refresh_token or "")
+                    await self._save_refreshed_tokens(
+                        user_id, new_enc_access, new_enc_refresh
+                    )
+            except RefreshError as e:
+                logger.warning(
+                    "Gmail token refresh failed for user %s: %s — proceeding with existing token",
+                    user_id,
+                    e,
+                )
+
+        return build("gmail", "v1", credentials=credentials, cache_discovery=False)
+
+    async def _save_refreshed_tokens(
+        self,
+        user_id: uuid.UUID,
+        enc_access: str,
+        enc_refresh: str,
+    ) -> None:
+        """Persist refreshed Google tokens back to provider_connections and users table."""
+        from sqlalchemy import select
+
+        from src.infrastructure.persistence.models import UserModel
+        from src.infrastructure.persistence.org_models import ProviderConnectionModel
+
+        try:
+            async with self._db_session_factory() as session:
+                # Update provider_connections
+                r = await session.execute(
+                    select(ProviderConnectionModel).where(
+                        ProviderConnectionModel.user_id == user_id,
+                        ProviderConnectionModel.provider == "google",
+                        ProviderConnectionModel.status == "active",
+                    )
+                )
+                conn = r.scalars().first()
+                if conn:
+                    conn.access_token = enc_access
+                    if enc_refresh:
+                        conn.refresh_token = enc_refresh
+
+                # Also update users table
+                r2 = await session.execute(
+                    select(UserModel).where(UserModel.id == user_id)
+                )
+                user = r2.scalars().first()
+                if user:
+                    user.google_access_token = enc_access
+                    if enc_refresh:
+                        user.google_refresh_token = enc_refresh
+
+                await session.commit()
+                logger.info("Persisted refreshed Gmail tokens for user %s", user_id)
+        except Exception as e:
+            logger.warning("Failed to persist refreshed tokens for user %s: %s", user_id, e)
 
     async def _get_user_tokens(self, user_id: uuid.UUID) -> dict | None:
         """Look up Google OAuth tokens — checks provider_connections first, then users table."""
@@ -521,4 +592,3 @@ class GmailEmailAdapter(EmailProviderPort):
                     return result
 
         return ""
-

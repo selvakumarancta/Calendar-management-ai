@@ -453,33 +453,21 @@ async def google_provider_auth(
             "redirect_uris": [f"{_get_base_url(settings)}/api/v1/orgs/google-callback"],
         }
     }
+    import base64
+    import json
+    import os
+
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
     flow = Flow.from_client_config(
         client_config,
         scopes=GOOGLE_CALENDAR_SCOPES,
         redirect_uri=f"{_get_base_url(settings)}/api/v1/orgs/google-callback",
+        autogenerate_code_verifier=False,
     )
 
-    # Generate PKCE code verifier
-    import base64
-    import hashlib
-    import json
-    import secrets
-
-    code_verifier = secrets.token_urlsafe(64)
-    code_challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
-    )
-
-    # Encode org_id, user_id, and code_verifier in state parameter
-    state_data = json.dumps(
-        {
-            "org_id": str(org_id),
-            "user_id": str(current_user.id),
-            "cv": code_verifier,
-        }
-    )
+    # Encode org_id and user_id in state parameter (no PKCE — confidential web client)
+    state_data = json.dumps({"org_id": str(org_id), "user_id": str(current_user.id)})
     state = base64.urlsafe_b64encode(state_data.encode()).decode()
 
     url, _ = flow.authorization_url(
@@ -487,8 +475,6 @@ async def google_provider_auth(
         include_granted_scopes="true",
         prompt="consent",
         state=state,
-        code_challenge=code_challenge,
-        code_challenge_method="S256",
     )
     return {"authorization_url": url}
 
@@ -516,16 +502,15 @@ async def google_provider_callback(
     settings = container.settings
     redirect_uri = f"{_get_base_url(settings)}/api/v1/orgs/google-callback"
 
-    # Decode state to get org_id, user_id, and PKCE code_verifier
+    # Decode state to get org_id and user_id
     try:
         state_data = json.loads(base64.urlsafe_b64decode(state))
         org_id = UUID(state_data["org_id"])
         user_id = UUID(state_data["user_id"])
-        code_verifier = state_data.get("cv", "")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid state parameter")
 
-    # Exchange authorization code for tokens (with PKCE code_verifier)
+    # Exchange authorization code for tokens (no PKCE — confidential web client)
     client_config = {
         "web": {
             "client_id": settings.google_client_id,
@@ -539,8 +524,9 @@ async def google_provider_callback(
         client_config,
         scopes=GOOGLE_CALENDAR_SCOPES,
         redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False,
     )
-    flow.fetch_token(code=code, code_verifier=code_verifier)
+    flow.fetch_token(code=code)
     credentials = flow.credentials
 
     raw_access_token = credentials.token
@@ -631,6 +617,9 @@ async def google_provider_callback(
 
 
 def _get_base_url(settings: object) -> str:
-    """Get the base URL for OAuth callbacks."""
+    """Get the base URL for OAuth callbacks — reads from app_base_url setting."""
+    base = getattr(settings, "app_base_url", "")
+    if base:
+        return base.rstrip("/")
     port = getattr(settings, "app_port", 8000)
     return f"http://localhost:{port}"

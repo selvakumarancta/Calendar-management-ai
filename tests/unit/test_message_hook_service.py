@@ -15,7 +15,6 @@ import pytest
 
 from src.application.services.message_hook_service import MessageHookService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -59,7 +58,9 @@ def _make_llm(extraction: dict) -> AsyncMock:
 
 def _make_calendar() -> AsyncMock:
     calendar = AsyncMock()
-    calendar.create_event = AsyncMock(return_value={"id": "evt-123", "title": "Coffee chat with Alice"})
+    calendar.create_event = AsyncMock(
+        return_value={"id": "evt-123", "title": "Coffee chat with Alice"}
+    )
     return calendar
 
 

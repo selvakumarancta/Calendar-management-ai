@@ -25,7 +25,6 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -63,25 +62,28 @@ async def auth_client(app):
 
 class TestAuthGuards:
     @pytest.mark.integration
-    @pytest.mark.parametrize("method,path,body", [
-        ("POST", "/api/v1/email/scan", {"provider": "google", "since_hours": 1}),
-        ("GET",  "/api/v1/email/drafts", None),
-        ("GET",  "/api/v1/email/analytics/summary", None),
-        ("POST", "/api/v1/email/hook/message", {"message": "hi", "sender": "x"}),
-        ("POST", "/api/v1/email/onboarding/start", {}),
-        ("GET",  "/api/v1/email/onboarding/status", None),
-        ("GET",  "/api/v1/email/guides", None),
-        ("GET",  "/api/v1/settings/user-preferences", None),
-        ("PUT",  "/api/v1/settings/user-preferences", {"autopilot_enabled": False}),
-    ])
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            ("POST", "/api/v1/email/scan", {"provider": "google", "since_hours": 1}),
+            ("GET", "/api/v1/email/drafts", None),
+            ("GET", "/api/v1/email/analytics/summary", None),
+            ("POST", "/api/v1/email/hook/message", {"message": "hi", "sender": "x"}),
+            ("POST", "/api/v1/email/onboarding/start", {}),
+            ("GET", "/api/v1/email/onboarding/status", None),
+            ("GET", "/api/v1/email/guides", None),
+            ("GET", "/api/v1/settings/user-preferences", None),
+            ("PUT", "/api/v1/settings/user-preferences", {"autopilot_enabled": False}),
+        ],
+    )
     async def test_endpoint_requires_auth(self, app, method, path, body):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             fn = getattr(client, method.lower())
             resp = await fn(path, json=body) if body is not None else await fn(path)
-            assert resp.status_code == 401, (
-                f"{method} {path} should require auth, got {resp.status_code}"
-            )
+            assert (
+                resp.status_code == 401
+            ), f"{method} {path} should require auth, got {resp.status_code}"
 
 
 # ---------------------------------------------------------------------------
@@ -138,17 +140,23 @@ class TestDrafts:
 
     @pytest.mark.integration
     async def test_get_nonexistent_draft_returns_404(self, auth_client):
-        resp = await auth_client.get("/api/v1/email/drafts/00000000-0000-0000-0000-000000000000")
+        resp = await auth_client.get(
+            "/api/v1/email/drafts/00000000-0000-0000-0000-000000000000"
+        )
         assert resp.status_code == 404
 
     @pytest.mark.integration
     async def test_send_nonexistent_draft_returns_404(self, auth_client):
-        resp = await auth_client.post("/api/v1/email/drafts/00000000-0000-0000-0000-000000000000/send")
+        resp = await auth_client.post(
+            "/api/v1/email/drafts/00000000-0000-0000-0000-000000000000/send"
+        )
         assert resp.status_code == 404
 
     @pytest.mark.integration
     async def test_delete_nonexistent_draft_returns_404(self, auth_client):
-        resp = await auth_client.delete("/api/v1/email/drafts/00000000-0000-0000-0000-000000000000")
+        resp = await auth_client.delete(
+            "/api/v1/email/drafts/00000000-0000-0000-0000-000000000000"
+        )
         assert resp.status_code == 404
 
 

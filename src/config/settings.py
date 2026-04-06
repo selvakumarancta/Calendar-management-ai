@@ -38,8 +38,8 @@ class Settings(BaseSettings):
 
     # --- Anthropic / Claude ---
     anthropic_api_key: str = ""
-    anthropic_model_primary: str = "claude-sonnet-4-20250514"
-    anthropic_model_fast: str = "claude-haiku-3-20250414"
+    anthropic_model_primary: str = "claude-sonnet-4-5"
+    anthropic_model_fast: str = "claude-haiku-4-5"
 
     # --- OpenAI ---
     openai_api_key: str = ""

@@ -50,22 +50,23 @@ class MicrosoftOAuthService:
         base = self.AUTH_URL.format(tenant=self._tenant_id)
         return f"{base}?{urlencode(params)}"
 
-    def exchange_code(self, code: str) -> dict[str, Any]:
+    async def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange authorization code for tokens."""
         import httpx
 
         token_url = self.TOKEN_URL.format(tenant=self._tenant_id)
-        response = httpx.post(
-            token_url,
-            data={
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "code": code,
-                "redirect_uri": self._redirect_uri,
-                "grant_type": "authorization_code",
-                "scope": " ".join(self.DEFAULT_SCOPES),
-            },
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                token_url,
+                data={
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "code": code,
+                    "redirect_uri": self._redirect_uri,
+                    "grant_type": "authorization_code",
+                    "scope": " ".join(self.DEFAULT_SCOPES),
+                },
+            )
         response.raise_for_status()
         data = response.json()
 
@@ -76,21 +77,24 @@ class MicrosoftOAuthService:
             "scope": data.get("scope", ""),
         }
 
-    def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
+    async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
         """Refresh an expired access token."""
         import httpx
 
         token_url = self.TOKEN_URL.format(tenant=self._tenant_id)
-        response = httpx.post(
-            token_url,
-            data={
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-                "scope": " ".join(self.DEFAULT_SCOPES),
-            },
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                token_url,
+                data={
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                    "scope": " ".join(self.DEFAULT_SCOPES),
+                },
+                        "scope": " ".join(self.DEFAULT_SCOPES),
+                },
+            )
         response.raise_for_status()
         data = response.json()
 

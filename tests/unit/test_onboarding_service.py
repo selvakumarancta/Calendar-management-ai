@@ -17,7 +17,6 @@ from src.application.services.onboarding_service import (
     OnboardingStatus,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -26,7 +25,9 @@ USER_ID = uuid.uuid4()
 USER_EMAIL = "alice@example.com"
 
 
-def _fake_email_obj(subject: str = "Team sync confirmed", body: str = "Confirmed for Monday 2pm"):
+def _fake_email_obj(
+    subject: str = "Team sync confirmed", body: str = "Confirmed for Monday 2pm"
+):
     obj = MagicMock()
     obj.subject = subject
     obj.body_text = body
@@ -104,7 +105,9 @@ async def test_onboarding_completes_without_adapters():
 @pytest.mark.asyncio
 async def test_onboarding_no_db_still_runs():
     """run_onboarding with no DB factory completes without crashing."""
-    svc = OnboardingService(llm_adapter=None, calendar_adapter=None, db_session_factory=None)
+    svc = OnboardingService(
+        llm_adapter=None, calendar_adapter=None, db_session_factory=None
+    )
     result = await svc.run_onboarding(
         user_id=USER_ID,
         user_email=USER_EMAIL,
@@ -136,11 +139,13 @@ async def test_history_gathered_from_calendar_and_email():
     llm = AsyncMock()
     # For backfill step: return null (no confirmed event to add)
     # For guide generation: return useful text
-    llm.chat_completion = AsyncMock(side_effect=[
-        "null",  # backfill extract → no event
-        "· You prefer morning meetings (10am)\n· 30-min default duration",  # scheduling prefs
-        "· Opens with 'Hi [name],'\n· Signs off 'Best'",  # style guide
-    ])
+    llm.chat_completion = AsyncMock(
+        side_effect=[
+            "null",  # backfill extract → no event
+            "· You prefer morning meetings (10am)\n· 30-min default duration",  # scheduling prefs
+            "· Opens with 'Hi [name],'\n· Signs off 'Best'",  # style guide
+        ]
+    )
 
     svc = OnboardingService(
         llm_adapter=llm,
@@ -175,11 +180,13 @@ async def test_backfill_adds_event_when_llm_confirms():
 
     backfill_json = '{"summary": "Team sync", "start_iso": "2026-03-15T14:00:00+00:00", "end_iso": "2026-03-15T15:00:00+00:00"}'
     llm = AsyncMock()
-    llm.chat_completion = AsyncMock(side_effect=[
-        backfill_json,  # backfill extract → confirmed event
-        "",             # scheduling prefs guide (empty)
-        "",             # style guide (empty)
-    ])
+    llm.chat_completion = AsyncMock(
+        side_effect=[
+            backfill_json,  # backfill extract → confirmed event
+            "",  # scheduling prefs guide (empty)
+            "",  # style guide (empty)
+        ]
+    )
 
     svc = OnboardingService(
         llm_adapter=llm,
@@ -232,7 +239,9 @@ async def test_calendar_error_in_backfill_does_not_crash():
 async def test_email_provider_error_does_not_crash():
     """If email provider raises during history gathering, onboarding still completes."""
     email_provider = AsyncMock()
-    email_provider.list_recent_emails = AsyncMock(side_effect=RuntimeError("Token expired"))
+    email_provider.list_recent_emails = AsyncMock(
+        side_effect=RuntimeError("Token expired")
+    )
 
     svc = OnboardingService(
         llm_adapter=None,

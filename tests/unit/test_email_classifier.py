@@ -21,7 +21,9 @@ from src.domain.entities.email_message import EmailMessage
 # ---------------------------------------------------------------------------
 
 
-def _email(subject: str = "", body: str = "", sender: str = "alice@example.com") -> EmailMessage:
+def _email(
+    subject: str = "", body: str = "", sender: str = "alice@example.com"
+) -> EmailMessage:
     return EmailMessage(
         id=uuid.uuid4(),
         provider_message_id="msg-1",
@@ -140,7 +142,9 @@ class TestEmailClassifierLLMPath:
             ' "participants": [], "duration_minutes": null, "proposed_times": []}'
         )
         service = self._service_with_mock(llm_json)
-        email = _email(subject="Special offer just for you", body="Act now and save 50%!")
+        email = _email(
+            subject="Special offer just for you", body="Act now and save 50%!"
+        )
         result = await service.classify(email)
         assert result.is_sales_email is True
         assert result.needs_draft is False

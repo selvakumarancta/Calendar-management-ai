@@ -39,11 +39,23 @@ class GoogleOAuthService:
         self._redirect_uri = redirect_uri
 
     def get_authorization_url(self, state: str | None = None) -> str:
-        """Generate the Google OAuth consent URL."""
+        """Generate the Google OAuth consent URL.
+
+        PKCE is intentionally disabled (autogenerate_code_verifier=False) because:
+        - This is a confidential web-server client (has a client_secret)
+        - PKCE requires persisting the verifier between the redirect and callback,
+          which breaks across server restarts / reloads in dev
+        - PKCE is mandatory only for public (mobile/SPA) clients
+        """
+        import os
+        # Allow Google to return extra/reordered scopes without raising an error
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
         flow = Flow.from_client_config(
             self._client_config,
             scopes=self.SCOPES,
             redirect_uri=self._redirect_uri,
+            autogenerate_code_verifier=False,
         )
         url, _ = flow.authorization_url(
             access_type="offline",
@@ -53,15 +65,32 @@ class GoogleOAuthService:
         )
         return url
 
-    def exchange_code(self, code: str) -> dict:
+    def exchange_code(self, code: str, state: str | None = None) -> dict:
         """Exchange authorization code for tokens."""
+        import os
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
         try:
             flow = Flow.from_client_config(
                 self._client_config,
                 scopes=self.SCOPES,
                 redirect_uri=self._redirect_uri,
+                autogenerate_code_verifier=False,
             )
             flow.fetch_token(code=code)
+            credentials = flow.credentials
+
+            return {
+                "access_token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "expiry": (
+                    credentials.expiry.replace(tzinfo=timezone.utc)
+                    if credentials.expiry
+                    else datetime.now(timezone.utc)
+                ),
+            }
+        except Exception as e:
+            raise AuthenticationError(f"OAuth code exchange failed: {e}") from e
             credentials = flow.credentials
 
             return {

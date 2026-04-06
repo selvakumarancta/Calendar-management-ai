@@ -13,7 +13,6 @@ import pytest
 
 from src.application.services.user_guides_service import UserGuidesService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -22,22 +21,57 @@ USER_ID = uuid.uuid4()
 USER_EMAIL = "alice@example.com"
 
 _CALENDAR_EVENTS = [
-    {"title": "1:1 with Bob", "start": "10:00", "end": "10:30", "day": "Monday", "date": "2026-03-10"},
-    {"title": "Team sync", "start": "09:00", "end": "10:00", "day": "Wednesday", "date": "2026-03-12"},
-    {"title": "Design review", "start": "14:00", "end": "15:00", "day": "Friday", "date": "2026-03-14"},
+    {
+        "title": "1:1 with Bob",
+        "start": "10:00",
+        "end": "10:30",
+        "day": "Monday",
+        "date": "2026-03-10",
+    },
+    {
+        "title": "Team sync",
+        "start": "09:00",
+        "end": "10:00",
+        "day": "Wednesday",
+        "date": "2026-03-12",
+    },
+    {
+        "title": "Design review",
+        "start": "14:00",
+        "end": "15:00",
+        "day": "Friday",
+        "date": "2026-03-14",
+    },
 ]
 
 _SENT_EMAILS = [
-    {"subject": "Re: Weekly call", "body": "Hi Bob, I'm free Monday 10am. Does that work?", "date": "2026-03-09", "sender": "alice@example.com"},
-    {"subject": "Schedule sync", "body": "Let's meet Wednesday morning. I'll send a calendar invite.", "date": "2026-03-11", "sender": "alice@example.com"},
-    {"subject": "Re: intro call", "body": "Happy to chat. How about Thursday 2pm? Best, Alice", "date": "2026-03-13", "sender": "alice@example.com"},
+    {
+        "subject": "Re: Weekly call",
+        "body": "Hi Bob, I'm free Monday 10am. Does that work?",
+        "date": "2026-03-09",
+        "sender": "alice@example.com",
+    },
+    {
+        "subject": "Schedule sync",
+        "body": "Let's meet Wednesday morning. I'll send a calendar invite.",
+        "date": "2026-03-11",
+        "sender": "alice@example.com",
+    },
+    {
+        "subject": "Re: intro call",
+        "body": "Happy to chat. How about Thursday 2pm? Best, Alice",
+        "date": "2026-03-13",
+        "sender": "alice@example.com",
+    },
 ]
 
 _SCHEDULING_GUIDE = "· You prefer morning meetings (9–11am)\n· You default to 30-minute 1:1s\n· You avoid back-to-back meetings"
 _STYLE_GUIDE = "· You open with 'Hi [name],'\n· You keep replies concise (2–3 sentences)\n· You sign off with 'Best, Alice'"
 
 
-def _make_llm(scheduling_response: str = _SCHEDULING_GUIDE, style_response: str = _STYLE_GUIDE) -> AsyncMock:
+def _make_llm(
+    scheduling_response: str = _SCHEDULING_GUIDE, style_response: str = _STYLE_GUIDE
+) -> AsyncMock:
     llm = AsyncMock()
     llm.chat_completion = AsyncMock(side_effect=[scheduling_response, style_response])
     return llm
@@ -111,7 +145,9 @@ async def test_generate_calls_llm_twice():
 @pytest.mark.asyncio
 async def test_generate_without_llm_returns_empty_strings():
     """Without LLM adapter, both guides are empty strings."""
-    svc = UserGuidesService(llm_adapter=None, db_session_factory=_fake_session_factory())
+    svc = UserGuidesService(
+        llm_adapter=None, db_session_factory=_fake_session_factory()
+    )
     scheduling, style = await svc.generate_all_guides(
         user_id=USER_ID,
         user_email=USER_EMAIL,
@@ -215,7 +251,9 @@ async def test_get_user_guides_returns_stored_guides():
     style_guide.content = _STYLE_GUIDE
 
     svc = UserGuidesService(
-        db_session_factory=_fake_session_factory(existing_guides=[sched_guide, style_guide])
+        db_session_factory=_fake_session_factory(
+            existing_guides=[sched_guide, style_guide]
+        )
     )
     scheduling, style = await svc.get_user_guides(USER_ID)
     assert scheduling == _SCHEDULING_GUIDE
@@ -247,8 +285,6 @@ async def test_scheduling_guide_passed_to_llm_contains_event_day():
 
     first_call_args = llm.chat_completion.call_args_list[0]
     messages = first_call_args.kwargs.get("messages") or first_call_args.args[0]
-    user_message_content = next(
-        m["content"] for m in messages if m["role"] == "user"
-    )
+    user_message_content = next(m["content"] for m in messages if m["role"] == "user")
     # The user prompt should contain the Monday event day
     assert "Monday" in user_message_content

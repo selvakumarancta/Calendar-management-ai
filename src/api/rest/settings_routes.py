@@ -407,7 +407,7 @@ async def test_connection(
                 s.google_client_secret
                 and not s.google_client_secret.startswith("your-")
             ),
-            "redirect_uri": f"http://localhost:{s.app_port}/api/v1/orgs/google-callback",
+            "redirect_uri": f"{s.app_base_url.rstrip('/')}/api/v1/orgs/google-callback",
         }
     return {"status": "error", "message": f"Unknown service: {service}"}
 

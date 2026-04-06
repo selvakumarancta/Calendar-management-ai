@@ -45,19 +45,17 @@ class AuthService:
         user = await self._user_repo.get_by_email(email)
         if user is None:
             user = User(email=email, name=name)
-
-        # Update Google tokens
-        user.update_google_tokens(access_token, refresh_token, token_expiry)
-        if user.id:
-            user = await self._user_repo.update(user)
-        else:
+            # Update tokens before persisting
+            user.update_google_tokens(access_token, refresh_token, token_expiry)
             user = await self._user_repo.create(user)
+        else:
+            # Update Google tokens on existing user
+            user.update_google_tokens(access_token, refresh_token, token_expiry)
+            user = await self._user_repo.update(user)
 
-        # Issue JWT
-        jwt_access = self._create_access_token(user)
-        jwt_refresh = self._create_refresh_token(user)
-
-        return user, jwt_access, jwt_refresh
+        # JWT issuance is delegated to the infrastructure JWTService;
+        # return empty strings so callers that use container.jwt_service() directly work fine.
+        return user, "", ""
 
     async def get_user_from_token(self, token: str) -> User:
         """Validate JWT and return the associated user."""

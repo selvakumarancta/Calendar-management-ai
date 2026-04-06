@@ -85,7 +85,7 @@ async def google_callback(
 
     # 1. Exchange code for Google tokens
     oauth = container.google_oauth()
-    tokens = oauth.exchange_code(code)
+    tokens = oauth.exchange_code(code, state=state)
 
     raw_access = tokens["access_token"]
     raw_refresh = tokens.get("refresh_token") or ""
@@ -151,7 +151,7 @@ async def google_callback(
         else:
             conn_model = ProviderConnectionModel(
                 id=_uuid.uuid4(),
-                org_id=user.id,          # personal account sentinel
+                org_id=user.id,  # personal account sentinel
                 user_id=user.id,
                 provider="google",
                 provider_email=google_email,
@@ -159,10 +159,12 @@ async def google_callback(
                 access_token=enc_access,
                 refresh_token=enc_refresh,
                 token_expiry=tokens["expiry"],
-                scopes=" ".join([
-                    "https://www.googleapis.com/auth/calendar",
-                    "https://www.googleapis.com/auth/gmail.readonly",
-                ]),
+                scopes=" ".join(
+                    [
+                        "https://www.googleapis.com/auth/calendar",
+                        "https://www.googleapis.com/auth/gmail.readonly",
+                    ]
+                ),
             )
             session.add(conn_model)
 
@@ -316,7 +318,9 @@ async def get_profile(
     container: Container = Depends(get_container),
 ) -> UserProfileDTO:
     """Get current user's profile and usage stats."""
-    monthly_used = await container.usage_tracker().get_monthly_request_count(current_user.id)
+    monthly_used = await container.usage_tracker().get_monthly_request_count(
+        current_user.id
+    )
     return UserProfileDTO(
         id=current_user.id,
         email=current_user.email,
