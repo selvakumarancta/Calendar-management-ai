@@ -42,6 +42,8 @@ class UpdateEventDTO(BaseModel):
 class EventResponseDTO(BaseModel):
     """Output representation of a calendar event."""
 
+    model_config = {"json_encoders": {datetime: lambda v: v.isoformat() + "Z" if v.tzinfo is None else v.isoformat()}}
+
     id: str
     provider_event_id: str | None = None
     title: str

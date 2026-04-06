@@ -404,6 +404,13 @@ function _doConnectWS() {
       appendMessage("assistant", data.content);
       if (data.conversation_id) conversationId = data.conversation_id;
       document.getElementById("btn-send").disabled = false;
+      // Refresh calendar if the AI response affected events
+      const lower = (data.content || "").toLowerCase();
+      if (lower.includes("scheduled") || lower.includes("created") ||
+          lower.includes("deleted") || lower.includes("cancelled") ||
+          lower.includes("updated") || lower.includes("rescheduled")) {
+        setTimeout(loadEvents, 600);
+      }
     } else if (data.type === "error") {
       removeTyping();
       appendMessage("assistant", "⚠️ " + data.content);
@@ -443,9 +450,12 @@ async function loadEvents() {
       return;
     }
 
+    // Ensure times are parsed as UTC (API returns naive ISO strings without Z)
+    const toUtc = s => s.endsWith('Z') || s.includes('+') ? s : s + 'Z';
+
     const groups = {};
     events.forEach(ev => {
-      const day = new Date(ev.start_time).toLocaleDateString(undefined, {
+      const day = new Date(toUtc(ev.start_time)).toLocaleDateString(undefined, {
         weekday: "long", month: "short", day: "numeric"
       });
       (groups[day] = groups[day] || []).push(ev);
@@ -458,7 +468,7 @@ async function loadEvents() {
           <div class="event-card">
             <div>
               <div class="event-title">${esc(ev.title)}</div>
-              <div class="event-time">${fmtTime(ev.start_time)} — ${fmtTime(ev.end_time)}</div>
+              <div class="event-time">${fmtTime(toUtc(ev.start_time))} — ${fmtTime(toUtc(ev.end_time))}</div>
             </div>
             <div class="event-status">${ev.status || "confirmed"}</div>
           </div>
