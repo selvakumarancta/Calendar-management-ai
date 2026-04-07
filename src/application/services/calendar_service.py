@@ -45,11 +45,22 @@ class CalendarService:
         self, user_id: UUID, dto: CreateEventDTO
     ) -> EventResponseDTO:
         """Create a new calendar event with conflict detection."""
+        from datetime import timezone as _tz
+
+        def _utc(dt: datetime) -> datetime:
+            """Normalise to UTC — Google Calendar returns tz-aware, DTO may be naive."""
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=_tz.utc)
+            return dt.astimezone(_tz.utc)
+
         # Validate time range
         if dto.start_time >= dto.end_time and not dto.is_all_day:
             raise InvalidTimeRangeError()
 
-        if dto.start_time < datetime.now(dto.start_time.tzinfo):
+        dto_start_utc = _utc(dto.start_time)
+        dto_end_utc = _utc(dto.end_time)
+
+        if dto_start_utc < datetime.now(_tz.utc):
             raise EventInPastError()
 
         # Check for conflicts
@@ -60,9 +71,11 @@ class CalendarService:
             calendar_id=dto.calendar_id,
         )
         for event in existing:
-            if event.start_time < dto.end_time and dto.start_time < event.end_time:
+            ev_start = _utc(event.start_time)
+            ev_end = _utc(event.end_time)
+            if ev_start < dto_end_utc and dto_start_utc < ev_end:
                 raise EventConflictError(
-                    f"Conflicts with '{event.title}' at {event.start_time.strftime('%H:%M')}"
+                    f"Conflicts with '{event.title}' at {ev_start.strftime('%H:%M UTC')}"
                 )
 
         # Build domain entity

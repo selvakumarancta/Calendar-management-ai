@@ -1050,35 +1050,74 @@ class EmailIntelligenceService:
         user_id: uuid.UUID,
         suggestion_id: uuid.UUID | None = None,
     ) -> None:
-        """Persist a scanned email with its analysis result for browsing."""
+        """Persist a scanned email with its analysis result for browsing.
+
+        Uses upsert semantics: if a row for (user_id, provider_message_id)
+        already exists it is updated in-place, preventing duplicate entries
+        when the same email is processed more than once (e.g. re-scans).
+        """
         if not self._db_session_factory:
             return
 
-        from src.infrastructure.persistence.email_models import ScannedEmailModel
+        try:
+            from sqlalchemy import select
 
-        async with self._db_session_factory() as session:
-            model = ScannedEmailModel(
-                user_id=user_id,
-                provider_message_id=email.provider_message_id,
-                provider=email.provider,
-                subject=email.subject,
-                sender_email=email.sender_email,
-                sender_name=email.sender_name,
-                recipients_json=json.dumps(email.recipients),
-                body_snippet=email.body_preview,
-                body_text=email.body_text[:5000],  # limit body size
-                received_at=email.received_at,
-                thread_id=email.thread_id,
-                has_attachments=email.has_attachments,
-                is_read=email.is_read,
-                is_actionable=analysis.is_actionable,
-                analysis_category=analysis.category.value,
-                analysis_confidence=analysis.confidence,
-                analysis_summary=analysis.summary or analysis.action_required,
-                suggestion_id=suggestion_id,
+            from src.infrastructure.persistence.email_models import ScannedEmailModel
+
+            async with self._db_session_factory() as session:
+                # Check for existing record to avoid duplicates
+                existing_result = await session.execute(
+                    select(ScannedEmailModel).where(
+                        ScannedEmailModel.user_id == user_id,
+                        ScannedEmailModel.provider_message_id
+                        == email.provider_message_id,
+                    )
+                )
+                existing = existing_result.scalar_one_or_none()
+
+                if existing:
+                    # Update in-place — don't create a duplicate row
+                    existing.is_actionable = analysis.is_actionable
+                    existing.analysis_category = analysis.category.value
+                    existing.analysis_confidence = analysis.confidence
+                    existing.analysis_summary = (
+                        analysis.summary or analysis.action_required
+                    )
+                    if suggestion_id:
+                        existing.suggestion_id = suggestion_id
+                else:
+                    model = ScannedEmailModel(
+                        user_id=user_id,
+                        provider_message_id=email.provider_message_id,
+                        provider=email.provider,
+                        subject=email.subject,
+                        sender_email=email.sender_email,
+                        sender_name=email.sender_name,
+                        recipients_json=json.dumps(email.recipients),
+                        body_snippet=email.body_preview,
+                        body_text=(email.body_text or "")[:5000],
+                        received_at=email.received_at,
+                        thread_id=email.thread_id,
+                        has_attachments=email.has_attachments,
+                        is_read=email.is_read,
+                        is_actionable=analysis.is_actionable,
+                        analysis_category=analysis.category.value,
+                        analysis_confidence=analysis.confidence,
+                        analysis_summary=(
+                            analysis.summary or analysis.action_required
+                        ),
+                        suggestion_id=suggestion_id,
+                    )
+                    session.add(model)
+
+                await session.commit()
+        except Exception as save_err:
+            logger.warning(
+                "Failed to save scanned email '%s' for user %s: %s",
+                email.subject,
+                user_id,
+                save_err,
             )
-            session.add(model)
-            await session.commit()
 
     async def get_scanned_emails(
         self,
