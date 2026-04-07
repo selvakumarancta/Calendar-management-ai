@@ -212,7 +212,18 @@ class GoogleCalendarAdapter(CalendarProviderPort):
 
     @staticmethod
     def _to_google_event(event: CalendarEvent) -> dict:
-        """Convert domain entity to Google Calendar API event body."""
+        """Convert domain entity to Google Calendar API event body.
+
+        Google Calendar API requires timezone-aware ISO strings in dateTime fields.
+        Naive datetimes are treated as UTC (appending 'Z').
+        """
+
+        def _fmt(dt: "datetime") -> str:  # noqa: F821
+            """Return an ISO string that always includes timezone offset."""
+            if dt.tzinfo is None:
+                return dt.isoformat() + "Z"  # treat naive as UTC
+            return dt.isoformat()
+
         body: dict[str, Any] = {
             "summary": event.title,
             "description": event.description or "",
@@ -223,8 +234,8 @@ class GoogleCalendarAdapter(CalendarProviderPort):
             body["start"] = {"date": event.start_time.strftime("%Y-%m-%d")}
             body["end"] = {"date": event.end_time.strftime("%Y-%m-%d")}
         else:
-            body["start"] = {"dateTime": event.start_time.isoformat()}
-            body["end"] = {"dateTime": event.end_time.isoformat()}
+            body["start"] = {"dateTime": _fmt(event.start_time), "timeZone": "UTC"}
+            body["end"] = {"dateTime": _fmt(event.end_time), "timeZone": "UTC"}
 
         if event.attendees:
             body["attendees"] = [

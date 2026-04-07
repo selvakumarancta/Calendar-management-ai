@@ -296,6 +296,32 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         user_id: UUID,
         event: CalendarEvent,
     ) -> CalendarEvent:
+        """Update event on Google Calendar (if tokens available) and in local DB."""
+        tokens = await self._get_google_tokens(user_id)
+        if tokens and event.provider_event_id:
+            try:
+                from src.infrastructure.calendar_providers.google_calendar import (
+                    GoogleCalendarAdapter,
+                )
+
+                service = self._build_google_service(tokens)
+                body = GoogleCalendarAdapter._to_google_event(event)
+                service.events().update(
+                    calendarId=event.calendar_id or "primary",
+                    eventId=event.provider_event_id,
+                    body=body,
+                ).execute()
+                logger.info(
+                    "Updated Google Calendar event %s for user %s",
+                    event.provider_event_id,
+                    user_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to update Google Calendar event %s: %s",
+                    event.provider_event_id,
+                    e,
+                )
         return await self._in_memory.update_event(user_id, event)
 
     async def delete_event(
@@ -304,7 +330,25 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         event_id: str,
         calendar_id: str = "primary",
     ) -> bool:
-        return await self._in_memory.delete_event(user_id, event_id, calendar_id)
+        """Delete event from Google Calendar (if tokens available) and local DB."""
+        tokens = await self._get_google_tokens(user_id)
+        google_deleted = False
+        if tokens and event_id:
+            try:
+                service = self._build_google_service(tokens)
+                service.events().delete(
+                    calendarId=calendar_id, eventId=event_id
+                ).execute()
+                google_deleted = True
+                logger.info(
+                    "Deleted Google Calendar event %s for user %s", event_id, user_id
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete Google Calendar event %s: %s", event_id, e
+                )
+        local_deleted = await self._in_memory.delete_event(user_id, event_id, calendar_id)
+        return google_deleted or local_deleted
 
     async def find_free_slots(
         self,
