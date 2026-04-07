@@ -48,6 +48,7 @@ class GoogleOAuthService:
         - PKCE is mandatory only for public (mobile/SPA) clients
         """
         import os
+
         # Allow Google to return extra/reordered scopes without raising an error
         os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
@@ -68,6 +69,7 @@ class GoogleOAuthService:
     def exchange_code(self, code: str, state: str | None = None) -> dict:
         """Exchange authorization code for tokens."""
         import os
+
         os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
         try:
