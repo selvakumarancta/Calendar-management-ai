@@ -76,60 +76,76 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                 )
                 rows = result.scalars().all()
                 for row in rows:
-                    if row.access_token and row.access_token != "dev-token":
-                        from src.infrastructure.security.token_encryption import (
-                            decrypt_token,
-                            encrypt_token,
+                    if not row.access_token or row.access_token == "dev-token":
+                        continue
+
+                    from src.infrastructure.security.token_encryption import (
+                        decrypt_token,
+                        encrypt_token,
+                    )
+
+                    access = decrypt_token(row.access_token)
+                    refresh = decrypt_token(row.refresh_token or "")
+
+                    # Skip rows where decryption silently failed (key mismatch)
+                    if not access:
+                        logger.warning(
+                            "Skipping undecryptable token row for user %s (key mismatch?)",
+                            user_id,
                         )
+                        continue
 
-                        access = decrypt_token(row.access_token)
-                        refresh = decrypt_token(row.refresh_token or "")
+                    # Always refresh using the refresh_token because we don't store
+                    # token expiry — google.oauth2.credentials.Credentials.valid
+                    # returns True when no expiry is set even if the token is expired.
+                    if refresh and self._google_client_id:
+                        try:
+                            import asyncio
 
-                        # Try to refresh the token to ensure it is still valid
-                        if refresh and self._google_client_id:
-                            try:
-                                from google.auth.transport.requests import Request
-                                from google.oauth2.credentials import Credentials
+                            from google.auth.transport.requests import Request
+                            from google.oauth2.credentials import Credentials
 
-                                creds = Credentials(
-                                    token=access,
-                                    refresh_token=refresh,
-                                    token_uri="https://oauth2.googleapis.com/token",
-                                    client_id=self._google_client_id,
-                                    client_secret=self._google_client_secret,
-                                )
-                                if not creds.valid:
-                                    import asyncio
-
-                                    await asyncio.get_event_loop().run_in_executor(
-                                        None, lambda: creds.refresh(Request())
+                            creds = Credentials(
+                                token=access,
+                                refresh_token=refresh,
+                                token_uri="https://oauth2.googleapis.com/token",
+                                client_id=self._google_client_id,
+                                client_secret=self._google_client_secret,
+                            )
+                            # Unconditionally refresh — we never store expiry so
+                            # creds.valid is always True even for expired tokens.
+                            await asyncio.get_event_loop().run_in_executor(
+                                None, lambda: creds.refresh(Request())
+                            )
+                            if creds.token:
+                                # Persist refreshed token
+                                row.access_token = encrypt_token(creds.token)
+                                if creds.refresh_token:
+                                    row.refresh_token = encrypt_token(
+                                        creds.refresh_token
                                     )
-                                    if creds.token and creds.token != access:
-                                        # Persist refreshed token
-                                        row.access_token = encrypt_token(creds.token)
-                                        if creds.refresh_token:
-                                            row.refresh_token = encrypt_token(
-                                                creds.refresh_token
-                                            )
-                                        await session.commit()
-                                        access = creds.token
-                                        refresh = creds.refresh_token or refresh
-                                        logger.info(
-                                            "Refreshed Google Calendar token for user %s",
-                                            user_id,
-                                        )
-                            except Exception as ref_err:
-                                logger.warning(
-                                    "Calendar token refresh failed for user %s: %s",
+                                await session.commit()
+                                access = creds.token
+                                refresh = creds.refresh_token or refresh
+                                logger.info(
+                                    "Refreshed Google Calendar token for user %s",
                                     user_id,
-                                    ref_err,
                                 )
+                        except Exception as ref_err:
+                            logger.warning(
+                                "Calendar token refresh failed for user %s: %s — "
+                                "trying next row",
+                                user_id,
+                                ref_err,
+                            )
+                            # Don't return an expired/invalid token; try next row
+                            continue
 
-                        return {
-                            "access_token": access,
-                            "refresh_token": refresh,
-                            "provider_email": row.provider_email,
-                        }
+                    return {
+                        "access_token": access,
+                        "refresh_token": refresh,
+                        "provider_email": row.provider_email,
+                    }
         except Exception as e:
             logger.warning("Failed to look up Google tokens: %s", e)
         return None

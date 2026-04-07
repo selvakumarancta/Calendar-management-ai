@@ -53,6 +53,9 @@ class GmailEmailAdapter(EmailProviderPort):
         access_token = decrypt_token(tokens["access_token"])
         refresh_token = decrypt_token(tokens.get("refresh_token", ""))
 
+        if not access_token:
+            raise RuntimeError(f"Could not decrypt Gmail access token for user {user_id}")
+
         credentials = Credentials(
             token=access_token,
             refresh_token=refresh_token or None,
@@ -61,8 +64,9 @@ class GmailEmailAdapter(EmailProviderPort):
             client_secret=self._client_secret,
         )
 
-        # Auto-refresh if expired or about to expire
-        if credentials.expired or not credentials.valid:
+        # Always refresh when a refresh_token is available — we don't store token
+        # expiry so credentials.valid / credentials.expired are unreliable.
+        if refresh_token and self._client_id:
             try:
                 import asyncio
 
@@ -78,7 +82,7 @@ class GmailEmailAdapter(EmailProviderPort):
                     )
             except RefreshError as e:
                 logger.warning(
-                    "Gmail token refresh failed for user %s: %s — proceeding with existing token",
+                    "Gmail token refresh failed for user %s: %s — using existing token",
                     user_id,
                     e,
                 )
