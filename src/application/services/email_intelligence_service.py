@@ -534,75 +534,89 @@ class EmailIntelligenceService:
                             )
                             continue
 
-                    # ---- needs_draft=False but IS a meeting category ----
-                    # The classifier says no reply needed but the email is still a
-                    # meeting request / event invitation — create a suggestion so the
-                    # user can see it in Pending and approve/dismiss as they choose.
-                    _MEETING_CATS = {
-                        EmailCategory.MEETING_REQUEST,
-                        EmailCategory.MEETING_RESCHEDULE,
-                        EmailCategory.MEETING_CANCELLATION,
-                        EmailCategory.APPOINTMENT,
-                        EmailCategory.EVENT_INVITATION,
-                    }
-                    if clf_response.category in _MEETING_CATS:
-                        nd_analysis = EmailAnalysis(
-                            email_id=email.id,
-                            category=clf_response.category,
-                            is_actionable=True,
-                            confidence=clf_response.confidence,
-                            summary=clf_response.summary,
-                            suggested_title=email.subject,
-                            suggested_attendees=clf_response.participants,
-                            suggested_duration_minutes=(
-                                clf_response.duration_minutes or 30
-                            ),
-                        )
-                        if clf_response.proposed_times:
-                            _t2 = " ".join(clf_response.proposed_times[:2])
-                            nd_analysis.suggested_time = self._extract_time(_t2)
-                            nd_analysis.suggested_date = self._extract_date(_t2)
-                        result.actionable_found += 1
-                        nd_suggestion = await self._create_suggestion(
-                            email=email,
-                            analysis=nd_analysis,
-                            user_id=user_id,
-                            org_id=org_id,
-                            user_timezone=user_timezone,
-                        )
-                        if nd_suggestion:
-                            result.suggestions_created += 1
+                        # ---- needs_draft=False but IS a meeting category ----
+                        # The classifier says no reply needed but the email is still a
+                        # meeting request / event invitation — create a suggestion so the
+                        # user can see it in Pending and approve/dismiss as they choose.
+                        _MEETING_CATS = {
+                            EmailCategory.MEETING_REQUEST,
+                            EmailCategory.MEETING_RESCHEDULE,
+                            EmailCategory.MEETING_CANCELLATION,
+                            EmailCategory.APPOINTMENT,
+                            EmailCategory.EVENT_INVITATION,
+                        }
+                        if clf_response.category in _MEETING_CATS:
+                            nd_analysis = EmailAnalysis(
+                                email_id=email.id,
+                                category=clf_response.category,
+                                is_actionable=True,
+                                confidence=clf_response.confidence,
+                                summary=clf_response.summary,
+                                suggested_title=email.subject,
+                                suggested_attendees=clf_response.participants,
+                                suggested_duration_minutes=(
+                                    clf_response.duration_minutes or 30
+                                ),
+                            )
+                            if clf_response.proposed_times:
+                                _t2 = " ".join(clf_response.proposed_times[:2])
+                                nd_analysis.suggested_time = self._extract_time(_t2)
+                                nd_analysis.suggested_date = self._extract_date(_t2)
+                            result.actionable_found += 1
+                            nd_suggestion = await self._create_suggestion(
+                                email=email,
+                                analysis=nd_analysis,
+                                user_id=user_id,
+                                org_id=org_id,
+                                user_timezone=user_timezone,
+                            )
+                            if nd_suggestion:
+                                result.suggestions_created += 1
+                            await self._save_scanned_email(
+                                email=email,
+                                analysis=nd_analysis,
+                                user_id=user_id,
+                                suggestion_id=nd_suggestion.id if nd_suggestion else None,
+                            )
+                            continue
+
+                        # Non-actionable per classifier — save and move on
                         await self._save_scanned_email(
                             email=email,
-                            analysis=nd_analysis,
+                            analysis=EmailAnalysis(
+                                email_id=email.id,
+                                category=clf_response.category,
+                                is_actionable=False,
+                                confidence=clf_response.confidence,
+                                summary=clf_response.summary,
+                            ),
                             user_id=user_id,
-                            suggestion_id=nd_suggestion.id if nd_suggestion else None,
+                            suggestion_id=None,
                         )
-                        continue
 
-                    # ---- Legacy analysis path (regex + LLM) ----
-                    analysis = await self.analyze_email(email)
+                    else:
+                        # ---- Legacy analysis path (no classifier configured) ----
+                        analysis = await self.analyze_email(email)
 
-                    if analysis.is_actionable:
-                        result.actionable_found += 1
+                        if analysis.is_actionable:
+                            result.actionable_found += 1
 
-                        suggestion = await self._create_suggestion(
+                            suggestion = await self._create_suggestion(
+                                email=email,
+                                analysis=analysis,
+                                user_id=user_id,
+                                org_id=org_id,
+                                user_timezone=user_timezone,
+                            )
+                            if suggestion:
+                                result.suggestions_created += 1
+
+                        await self._save_scanned_email(
                             email=email,
                             analysis=analysis,
                             user_id=user_id,
-                            org_id=org_id,
-                            user_timezone=user_timezone,
+                            suggestion_id=suggestion.id if suggestion else None,
                         )
-                        if suggestion:
-                            result.suggestions_created += 1
-
-                    await self._save_scanned_email(
-                        email=email,
-                        analysis=analysis,
-                        user_id=user_id,
-                        suggestion_id=suggestion.id if suggestion else None,
-                    )
-
 
                 except Exception as e:
                     logger.warning("Failed to analyze email %s: %s", email.subject, e)
