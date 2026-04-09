@@ -123,12 +123,15 @@ needs_draft examples:
 doesnt_need_draft examples:
 - Email is not about scheduling at all
 - Newsletters, product updates, marketing emails
-- Multi-day events (conferences, retreats, offsites)
+- Multi-day events only if they are automated notifications or mass group announcements
 - Group announcements addressed to many people
 - Automated calendar notifications (Google Calendar reminders, event updates)
 - Automated calendar invites ("has invited you to the following event")
 - Booking confirmations from scheduling tools (Calendly, Cal.com, Zoom) — meeting already booked
 - Any system-generated email about a meeting that was already scheduled
+
+IMPORTANT: A personal email inviting the user to a 2-day or multi-day meeting/workshop/training
+IS actionable — set needs_draft=true and category="event_invitation" or "meeting_request".
 
 You MUST respond with a single JSON object only, no prose:
 {{
@@ -477,20 +480,105 @@ class EmailIntelligenceService:
                         # needs_draft=False (but not sales): fall through to
                         # legacy analysis for calendar invites, reminders, etc.
                         if clf_response.already_resolved:
-                            # Thread fully resolved — save as scanned, skip suggestion
+                            # Thread appears resolved — but if it's a meeting category,
+                            # still create a suggestion so the user can see it in Pending
+                            # and either confirm or dismiss it.
+                            _MEETING_CATEGORIES = {
+                                EmailCategory.MEETING_REQUEST,
+                                EmailCategory.MEETING_RESCHEDULE,
+                                EmailCategory.MEETING_CANCELLATION,
+                                EmailCategory.APPOINTMENT,
+                                EmailCategory.EVENT_INVITATION,
+                            }
+                            already_resolved_analysis = EmailAnalysis(
+                                email_id=email.id,
+                                category=clf_response.category,
+                                is_actionable=clf_response.category in _MEETING_CATEGORIES,
+                                confidence=clf_response.confidence,
+                                summary=clf_response.summary,
+                                suggested_title=email.subject,
+                                suggested_attendees=clf_response.participants,
+                                suggested_duration_minutes=(
+                                    clf_response.duration_minutes or 30
+                                ),
+                            )
+                            if clf_response.proposed_times:
+                                _t = " ".join(clf_response.proposed_times[:2])
+                                already_resolved_analysis.suggested_time = (
+                                    self._extract_time(_t)
+                                )
+                                already_resolved_analysis.suggested_date = (
+                                    self._extract_date(_t)
+                                )
+                            resolved_suggestion = None
+                            if clf_response.category in _MEETING_CATEGORIES:
+                                result.actionable_found += 1
+                                resolved_suggestion = await self._create_suggestion(
+                                    email=email,
+                                    analysis=already_resolved_analysis,
+                                    user_id=user_id,
+                                    org_id=org_id,
+                                    user_timezone=user_timezone,
+                                )
+                                if resolved_suggestion:
+                                    result.suggestions_created += 1
                             await self._save_scanned_email(
                                 email=email,
-                                analysis=EmailAnalysis(
-                                    email_id=email.id,
-                                    category=clf_response.category,
-                                    is_actionable=False,
-                                    confidence=clf_response.confidence,
-                                    summary=clf_response.summary,
-                                ),
+                                analysis=already_resolved_analysis,
                                 user_id=user_id,
-                                suggestion_id=None,
+                                suggestion_id=(
+                                    resolved_suggestion.id
+                                    if resolved_suggestion
+                                    else None
+                                ),
                             )
                             continue
+
+                    # ---- needs_draft=False but IS a meeting category ----
+                    # The classifier says no reply needed but the email is still a
+                    # meeting request / event invitation — create a suggestion so the
+                    # user can see it in Pending and approve/dismiss as they choose.
+                    _MEETING_CATS = {
+                        EmailCategory.MEETING_REQUEST,
+                        EmailCategory.MEETING_RESCHEDULE,
+                        EmailCategory.MEETING_CANCELLATION,
+                        EmailCategory.APPOINTMENT,
+                        EmailCategory.EVENT_INVITATION,
+                    }
+                    if clf_response.category in _MEETING_CATS:
+                        nd_analysis = EmailAnalysis(
+                            email_id=email.id,
+                            category=clf_response.category,
+                            is_actionable=True,
+                            confidence=clf_response.confidence,
+                            summary=clf_response.summary,
+                            suggested_title=email.subject,
+                            suggested_attendees=clf_response.participants,
+                            suggested_duration_minutes=(
+                                clf_response.duration_minutes or 30
+                            ),
+                        )
+                        if clf_response.proposed_times:
+                            _t2 = " ".join(clf_response.proposed_times[:2])
+                            nd_analysis.suggested_time = self._extract_time(_t2)
+                            nd_analysis.suggested_date = self._extract_date(_t2)
+                        result.actionable_found += 1
+                        nd_suggestion = await self._create_suggestion(
+                            email=email,
+                            analysis=nd_analysis,
+                            user_id=user_id,
+                            org_id=org_id,
+                            user_timezone=user_timezone,
+                        )
+                        if nd_suggestion:
+                            result.suggestions_created += 1
+                        await self._save_scanned_email(
+                            email=email,
+                            analysis=nd_analysis,
+                            user_id=user_id,
+                            suggestion_id=nd_suggestion.id if nd_suggestion else None,
+                        )
+                        continue
 
                     # ---- Legacy analysis path (regex + LLM) ----
                     analysis = await self.analyze_email(email)

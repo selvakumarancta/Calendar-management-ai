@@ -82,8 +82,12 @@ needs_draft = false examples:
 - Group announcements to many people ("Hi team", "Hi founders")
 - User is only CC'd, not the primary recipient
 - Newsletter, digest, product update emails
-- Multi-day events (conferences, retreats, summits)
 - Thread is already fully resolved (time confirmed, no further action needed)
+
+IMPORTANT: Multi-day or all-day meetings (2-day workshops, offsites, hackathons, training sessions, etc.)
+still need a draft reply IF the email is a personal invitation requesting the user to attend or confirm.
+Only mark needs_draft=false for multi-day events if they are automated notifications or mass announcements.
+Always set category="event_invitation" or "meeting_request" for personal multi-day meeting invites.
 
 is_sales_email = true when:
 - Unsolicited cold outreach (no prior relationship)
