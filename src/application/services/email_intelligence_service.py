@@ -1123,7 +1123,7 @@ class EmailIntelligenceService:
         self,
         user_id: uuid.UUID,
         actionable_only: bool = False,
-        limit: int = 50,
+        limit: int = 200,
     ) -> list[dict]:
         """Get scanned emails for a user with analysis results."""
         if not self._db_session_factory:

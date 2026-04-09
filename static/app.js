@@ -775,7 +775,7 @@ async function loadEmailProviders() {
 
 async function loadScannedEmails() {
   try {
-    scannedEmails = await api("GET", "/api/v1/email/scanned-emails?limit=50");
+    scannedEmails = await api("GET", "/api/v1/email/scanned-emails?limit=200");
     document.getElementById("tab-count-emails").textContent = scannedEmails.length;
     if (emailCurrentTab === "emails") {
       renderScannedEmails();
@@ -1091,7 +1091,7 @@ async function triggerEmailScan() {
     const result = await api("POST", "/api/v1/email/scan", {
       provider,
       since_hours: sinceHours,
-      max_emails: 50,
+      max_emails: 100,
       rescan,
     });
 

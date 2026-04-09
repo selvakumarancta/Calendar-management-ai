@@ -28,7 +28,7 @@ class ScanRequest(BaseModel):
     since_hours: int = Field(
         default=168, ge=1, le=720, description="How many hours back to scan (default 7 days)"
     )
-    max_emails: int = Field(default=50, ge=1, le=200)
+    max_emails: int = Field(default=100, ge=1, le=200)
     rescan: bool = Field(
         default=False,
         description="Re-scan emails that were already processed (use when fixing classifier bugs)",
@@ -299,7 +299,7 @@ async def get_email_providers(
 @email_router.get("/scanned-emails")
 async def get_scanned_emails(
     actionable_only: bool = False,
-    limit: int = 50,
+    limit: int = 200,
     current_user: User = Depends(get_current_user),
     container: Container = Depends(get_container),
 ) -> list[dict]:

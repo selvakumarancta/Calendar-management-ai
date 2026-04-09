@@ -193,31 +193,36 @@ class GmailEmailAdapter(EmailProviderPort):
             service = await self._get_service(user_id)
 
             after_epoch = int(since.timestamp())
-            search_parts = [f"after:{after_epoch}"]
+            search_parts = [f"after:{after_epoch}", "in:inbox"]
             if query:
                 search_parts.append(query)
             else:
-                # Only scan scheduling/task/calendar-related emails.
-                # Explicitly exclude transaction, promotional, and social mail.
+                # Search subject AND body for scheduling-related keywords so we
+                # don't miss emails with generic subjects like "Hey" or "Tomorrow".
+                # Exclude promotional / transactional noise via labels.
                 search_parts.append(
                     "("
-                    "subject:(meeting OR schedule OR appointment OR invite OR invitation OR "
-                    "calendar OR call OR sync OR standup OR stand-up OR review OR deadline OR "
-                    "task OR agenda OR conference OR webinar OR demo OR interview OR "
-                    "catch-up OR \"catch up\" OR connect OR discuss OR availability OR "
-                    "reschedule OR confirm OR \"follow up\" OR followup OR reminder OR "
-                    "\"action required\" OR \"please attend\" OR rsvp)"
+                    "meeting OR schedule OR appointment OR invite OR invitation OR "
+                    "calendar OR standup OR \"stand-up\" OR sync OR interview OR "
+                    "deadline OR agenda OR conference OR webinar OR demo OR rsvp OR "
+                    "reschedule OR \"follow up\" OR followup OR reminder OR "
+                    "\"action required\" OR \"please attend\" OR "
+                    "\"let's meet\" OR \"let us meet\" OR \"can we meet\" OR "
+                    "\"are you free\" OR \"are you available\" OR \"hop on\" OR "
+                    "\"catch up\" OR \"catch-up\" OR \"quick call\" OR \"quick chat\" OR "
+                    "\"set up a call\" OR \"set up a meeting\" OR \"book a time\" OR "
+                    "\"pick a time\" OR \"find a time\" OR \"block some time\""
+                    ")"
                     " OR from:calendar-notification@google.com"
                     " OR from:noreply@google.com"
-                    ")"
                     " -label:promotions"
                     " -label:social"
                     " -category:promotions"
                     " -category:social"
-                    " -subject:(transaction OR receipt OR invoice OR payment OR order OR "
-                    "\"bank statement\" OR \"account statement\" OR OTP OR statement OR "
-                    "\"your order\" OR shipping OR delivery OR \"password reset\" OR "
-                    "newsletter OR unsubscribe OR \"special offer\" OR discount OR sale)"
+                    " -subject:(receipt OR invoice OR payment OR \"bank statement\" OR "
+                    "\"account statement\" OR OTP OR shipping OR delivery OR "
+                    "\"password reset\" OR newsletter OR unsubscribe OR "
+                    "\"special offer\" OR discount)"
                 )
 
             search_query = " ".join(search_parts)
