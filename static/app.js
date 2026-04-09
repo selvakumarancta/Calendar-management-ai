@@ -440,7 +440,9 @@ async function loadEvents() {
   const start = new Date(now);
   start.setDate(start.getDate() + weekOffset * 7 - start.getDay());
   start.setHours(0, 0, 0, 0);
-  const end = new Date(start); end.setDate(end.getDate() + 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  end.setHours(23, 59, 59, 999); // include all events on the last day of the week
 
   const opts = { month: "short", day: "numeric" };
   document.getElementById("week-label").textContent =

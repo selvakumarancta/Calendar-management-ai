@@ -224,16 +224,17 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         service = self._build_google_service(tokens)
 
         # Ensure timezone-aware ISO format
-        start_iso = start.isoformat()
-        end_iso = end.isoformat()
-        if "T" not in start_iso:
-            start_iso += "T00:00:00Z"
-        if "T" not in end_iso:
-            end_iso += "T23:59:59Z"
-        if not start_iso.endswith("Z") and "+" not in start_iso:
-            start_iso += "Z"
-        if not end_iso.endswith("Z") and "+" not in end_iso:
-            end_iso += "Z"
+        from datetime import timezone as _tz
+
+        def _to_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=_tz.utc)
+            return dt.astimezone(_tz.utc)
+
+        start_utc = _to_utc(start)
+        end_utc = _to_utc(end)
+        start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         result = (
             service.events()

@@ -191,9 +191,13 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     CalendarEventModel.user_id == user_id,
                 )
                 if start:
-                    q = q.where(CalendarEventModel.end_time > start)
+                    # Strip tzinfo so the comparison against naive DB datetimes is
+                    # consistent — SQLite stores datetimes as naive UTC strings.
+                    start_naive = start.replace(tzinfo=None) if start.tzinfo else start
+                    q = q.where(CalendarEventModel.end_time > start_naive)
                 if end:
-                    q = q.where(CalendarEventModel.start_time < end)
+                    end_naive = end.replace(tzinfo=None) if end.tzinfo else end
+                    q = q.where(CalendarEventModel.start_time < end_naive)
                 if exclude_cancelled:
                     q = q.where(CalendarEventModel.status != "cancelled")
                 q = q.order_by(CalendarEventModel.start_time).limit(max_results)
@@ -239,14 +243,16 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         if db_events:
             return db_events
 
-        # Fallback to in-memory
+        # Fallback to in-memory — normalise to naive UTC for comparison
+        start_cmp = start.replace(tzinfo=None) if start.tzinfo else start
+        end_cmp = end.replace(tzinfo=None) if end.tzinfo else end
         results = [
             e
             for e in self._events.values()
             if e.user_id == user_id
             and e.status != EventStatus.CANCELLED
-            and e.start_time < end
-            and e.end_time > start
+            and (e.start_time.replace(tzinfo=None) if e.start_time.tzinfo else e.start_time) < end_cmp
+            and (e.end_time.replace(tzinfo=None) if e.end_time.tzinfo else e.end_time) > start_cmp
         ]
         results.sort(key=lambda e: e.start_time)
         return results[:max_results]
