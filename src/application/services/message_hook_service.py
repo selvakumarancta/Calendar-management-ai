@@ -164,11 +164,15 @@ class MessageHookService:
                 temperature=0,
                 max_tokens=400,
             )
-            text = response if isinstance(response, str) else (
-                # Anthropic returns content as list of blocks
-                response["content"][0]["text"]
-                if isinstance(response.get("content"), list)
-                else response.get("content", "")
+            text = (
+                response
+                if isinstance(response, str)
+                else (
+                    # Anthropic returns content as list of blocks
+                    response["content"][0]["text"]
+                    if isinstance(response.get("content"), list)
+                    else response.get("content", "")
+                )
             )
             text = text.strip()
             if text.startswith("```"):
@@ -184,6 +188,10 @@ class MessageHookService:
         """Create a calendar event from extracted commitment data."""
         if not self._calendar:
             return {"action": "suggested", "reason": "Calendar adapter not available"}
+
+        if user_id is None:
+            logger.error("_create_event_from_extraction called with user_id=None; skipping")
+            return {"action": "error", "reason": "No authenticated user — cannot create event"}
 
         try:
             from datetime import timedelta
@@ -213,26 +221,28 @@ class MessageHookService:
             )
             # Use CalendarService (which converts DTO → domain entity) if available,
             # otherwise fall back to calling the provider adapter directly via entity
-            if hasattr(self._calendar, "create_event"):
-                from src.domain.entities.calendar_event import (
-                    Attendee,
-                    CalendarEvent,
-                    Reminder,
-                )
+            if not hasattr(self._calendar, "create_event"):
+                return {"action": "suggested", "reason": "Calendar adapter has no create_event method"}
 
-                entity = CalendarEvent(
-                    user_id=user_id,
-                    title=dto.title,
-                    description=dto.description,
-                    location=dto.location,
-                    start_time=dto.start_time,
-                    end_time=dto.end_time,
-                    is_all_day=dto.is_all_day,
-                    calendar_id=dto.calendar_id,
-                    attendees=[Attendee(email=e) for e in dto.attendee_emails],
-                    reminders=[Reminder(minutes_before=dto.reminder_minutes)],
-                )
-                event = await self._calendar.create_event(user_id, entity)
+            from src.domain.entities.calendar_event import (
+                Attendee,
+                CalendarEvent,
+                Reminder,
+            )
+
+            entity = CalendarEvent(
+                user_id=user_id,
+                title=dto.title,
+                description=dto.description,
+                location=dto.location,
+                start_time=dto.start_time,
+                end_time=dto.end_time,
+                is_all_day=dto.is_all_day,
+                calendar_id=dto.calendar_id,
+                attendees=[Attendee(email=e) for e in dto.attendee_emails],
+                reminders=[Reminder(minutes_before=dto.reminder_minutes)],
+            )
+            event = await self._calendar.create_event(user_id, entity)
             logger.info(
                 "Message hook auto-created event: '%s' at %s for user %s",
                 dto.title,

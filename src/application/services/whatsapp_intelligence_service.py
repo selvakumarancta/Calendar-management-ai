@@ -61,8 +61,16 @@ class WhatsAppIntelligenceService:
 
     async def _resolve_user_id(self, from_phone: str) -> uuid.UUID | None:
         """
-        Find the app user whose linked phone matches from_phone.
-        Falls back to the first user with a Google token (for demo/single-user).
+        Resolve the calendar owner for an incoming WhatsApp message.
+
+        Strategy (first match wins):
+        1. User with Google tokens — owns the calendar being managed.
+        2. Any user in the database — for single-agent installs without OAuth yet.
+
+        The phone_number column is intentionally not queried because the schema
+        does not define it.  All messages are routed to the agent owner's calendar
+        regardless of the sender, which is the correct behaviour when a single
+        WhatsApp number serves as the agent's intake channel.
         """
         if not self._db:
             return None
@@ -70,26 +78,32 @@ class WhatsAppIntelligenceService:
             from sqlalchemy import text
 
             async with self._db() as session:
-                # Try to match by phone number stored in users table
+                # Primary: user with an active Google OAuth token
                 r = await session.execute(
                     text(
-                        "SELECT id FROM users WHERE phone_number=:ph OR phone_number=:ph2 LIMIT 1"
-                    ),
-                    {"ph": from_phone, "ph2": "+" + from_phone},
+                        "SELECT id FROM users "
+                        "WHERE google_access_token IS NOT NULL "
+                        "ORDER BY created_at ASC LIMIT 1"
+                    )
                 )
                 row = r.fetchone()
                 if row:
-                    return uuid.UUID(row[0]) if isinstance(row[0], str) else row[0]
+                    uid = row[0]
+                    return uuid.UUID(uid) if isinstance(uid, str) else uid
 
-                # Demo fallback: use the first user with Google tokens
+                # Secondary: first registered user (may connect Google later)
                 r2 = await session.execute(
-                    text(
-                        "SELECT id FROM users WHERE google_access_token IS NOT NULL LIMIT 1"
-                    )
+                    text("SELECT id FROM users ORDER BY created_at ASC LIMIT 1")
                 )
                 row2 = r2.fetchone()
                 if row2:
-                    return uuid.UUID(row2[0]) if isinstance(row2[0], str) else row2[0]
+                    uid2 = row2[0]
+                    logger.warning(
+                        "No Google-authenticated user found; routing WhatsApp "
+                        "message to first user in DB (%s)", uid2
+                    )
+                    return uuid.UUID(uid2) if isinstance(uid2, str) else uid2
+
         except Exception as exc:
             logger.warning("User lookup failed: %s", exc)
         return None
@@ -121,6 +135,15 @@ class WhatsAppIntelligenceService:
         try:
             user_id = await self._resolve_user_id(msg.from_phone)
 
+            if user_id is None:
+                logger.error(
+                    "No calendar owner found in DB — cannot create event for "
+                    "WhatsApp msg %s. Register/login via the web UI first.",
+                    msg.message_id,
+                )
+                result.error = "No authenticated user found. Please sign in via the app."
+                return result
+
             # Use MessageHookService to detect commitment and auto-create event
             hook_result = await self._hook.process_message(
                 user_id=user_id,
@@ -143,9 +166,11 @@ class WhatsAppIntelligenceService:
             created_event = hook_result.get("created_event") or hook_result.get("event")
             if created_event or hook_result.get("action") == "created":
                 result.event_created = True
-                result.google_event_id = getattr(
-                    created_event, "provider_event_id", None
-                ) if created_event else hook_result.get("event_id")
+                result.google_event_id = (
+                    getattr(created_event, "provider_event_id", None)
+                    if created_event
+                    else hook_result.get("event_id")
+                )
                 logger.info(
                     "WhatsApp msg %s → created event '%s' (google_id=%s)",
                     msg.message_id,
