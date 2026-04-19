@@ -506,6 +506,7 @@
           </div>
           <div class="tab-bar">
             <button class="tab active" data-watab="test"     onclick="switchWaTab('test')">Send Test</button>
+            <button class="tab"         data-watab="replay"  onclick="switchWaTab('replay')">Replay Messages</button>
             <button class="tab"         data-watab="setup"   onclick="switchWaTab('setup')">Webhook Setup</button>
             <button class="tab"         data-watab="verify"  onclick="switchWaTab('verify')">Verify Token</button>
             <button class="tab"         data-watab="history" onclick="switchWaTab('history')">Event History <span id="wa-history-count" class="tab-count">0</span></button>
@@ -553,6 +554,30 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- Tab: Replay Messages -->
+          <div id="wa-replay-panel" class="content-scroll padded" style="display:none">
+            <div class="sched-form-card">
+              <h4>Replay Previous WhatsApp Messages</h4>
+              <p class="text-muted">Paste any previous WhatsApp messages (one per line). The agent will scan each for meeting commitments and create Google Calendar events automatically.</p>
+              <div class="form-group" style="margin-top:1rem">
+                <label class="settings-label">Sender Phone (optional)</label>
+                <input id="wa-replay-phone" type="text" class="input" value="919876543210" placeholder="e.g. 919876543210" />
+              </div>
+              <div class="form-group">
+                <label class="settings-label">Messages — one per line</label>
+                <textarea id="wa-replay-messages" class="input textarea" rows="8" placeholder="Let's have a team catch-up on Thursday 30 April at 3pm IST&#10;Board review confirmed for May 6 at 11am with executive team&#10;Coffee chat tomorrow at 9am — works for you?"></textarea>
+              </div>
+              <div style="display:flex;gap:.5rem;margin-top:.75rem">
+                <button class="btn btn-primary" onclick="sendWaReplay()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+                  Process All Messages
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="loadWaReplayPresets()">Load sample messages</button>
+              </div>
+            </div>
+            <div id="wa-replay-result"></div>
           </div>
 
           <!-- Tab: Webhook Setup -->

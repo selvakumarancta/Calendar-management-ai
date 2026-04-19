@@ -2309,7 +2309,7 @@ function loadWhatsAppView() {
 function switchWaTab(name) {
   document.querySelectorAll("[data-watab]").forEach(t => t.classList.remove("active"));
   document.querySelector(`[data-watab='${name}']`).classList.add("active");
-  ["test", "setup", "verify", "history"].forEach(n => {
+  ["test", "replay", "setup", "verify", "history"].forEach(n => {
     document.getElementById(`wa-${n}-panel`).style.display = n === name ? "" : "none";
   });
   if (name === "history") loadWaHistory();
@@ -2325,6 +2325,84 @@ let _waPresetIdx = 0;
 function loadWaPresets() {
   document.getElementById("wa-msg-text").value = WA_PRESETS[_waPresetIdx % WA_PRESETS.length];
   _waPresetIdx++;
+}
+
+const WA_REPLAY_SAMPLES = [
+  "Board strategy session confirmed for April 22 at 4pm IST with executive team",
+  "Product demo call with the sales team on April 25 at 2pm IST",
+  "Quick project review call on Monday April 27 at 11am",
+  "Team standup every Monday at 10am starting April 27",
+  "Client onboarding call scheduled for May 5 2026 at 3pm with the product team",
+];
+function loadWaReplayPresets() {
+  document.getElementById("wa-replay-messages").value = WA_REPLAY_SAMPLES.join("\n");
+}
+
+async function sendWaReplay() {
+  const phone = document.getElementById("wa-replay-phone").value.trim() || "919876543210";
+  const raw   = document.getElementById("wa-replay-messages").value.trim();
+  if (!raw) { showToast("Paste at least one message first", "error"); return; }
+
+  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  const resultEl = document.getElementById("wa-replay-result");
+  resultEl.innerHTML = `<div class="empty-state" style="padding:1rem">⏳ Processing ${lines.length} message${lines.length > 1 ? "s" : ""}…</div>`;
+
+  try {
+    const data = await api("POST", "/api/v1/webhooks/whatsapp/replay", {
+      from_phone: phone,
+      messages: lines.map(text => ({ text, from: phone })),
+    });
+
+    const { processed, meetings_detected, events_created, results } = data;
+
+    // Refresh history badge
+    if (events_created > 0 && token) {
+      api("GET", "/api/v1/webhooks/whatsapp/events?limit=50")
+        .then(d => {
+          const b = document.getElementById("wa-history-count");
+          const n = (d.events || []).length;
+          b.textContent = n;
+          b.style.display = n ? "inline-flex" : "none";
+        }).catch(() => {});
+    }
+
+    const summaryColor = events_created > 0 ? "var(--green)" : "var(--text2)";
+    let html = `
+      <div style="margin-top:1rem;padding:.75rem 1rem;background:var(--bg2);border:1px solid var(--border);border-radius:8px;display:flex;gap:2rem;font-size:.85rem">
+        <span><strong style="color:var(--text1)">${processed}</strong> <span style="color:var(--text2)">processed</span></span>
+        <span><strong style="color:#e3b341">${meetings_detected}</strong> <span style="color:var(--text2)">meetings detected</span></span>
+        <span><strong style="color:${summaryColor}">${events_created}</strong> <span style="color:var(--text2)">events created</span></span>
+      </div>
+      <div style="margin-top:.75rem;border:1px solid var(--border);border-radius:8px;overflow:hidden">`;
+
+    for (const r of results) {
+      const created = r.event_created;
+      const detected = r.has_meeting;
+      const dot = created ? "#22c55e" : detected ? "#e3b341" : "var(--text2)";
+      const label = created ? "✓ Created" : detected ? "⚠ Detected" : "– No meeting";
+      const startFmt = r.event_start ? new Date(r.event_start).toLocaleString(undefined, {weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
+      const endFmt   = r.event_end   ? new Date(r.event_end).toLocaleString(undefined, {hour:"2-digit",minute:"2-digit"}) : "";
+
+      html += `
+        <div style="padding:.75rem 1rem;border-bottom:1px solid var(--border);display:grid;grid-template-columns:8px 1fr auto;gap:.5rem .75rem;align-items:start">
+          <span style="width:8px;height:8px;border-radius:50%;background:${dot};margin-top:.35rem;display:inline-block;flex-shrink:0"></span>
+          <div>
+            <div style="font-size:.85rem;color:var(--text2);font-style:italic;">"${esc(r.text)}"</div>
+            ${created ? `<div style="font-size:.82rem;font-weight:600;color:var(--text1);margin-top:.3rem">${esc(r.event_title || "")}</div>
+            <div style="font-size:.79rem;color:var(--text2)">${startFmt}${endFmt ? " → " + endFmt : ""}</div>` : ""}
+            ${r.error ? `<div style="font-size:.79rem;color:var(--red);margin-top:.2rem">${esc(r.error)}</div>` : ""}
+          </div>
+          <span style="font-size:.75rem;font-weight:600;color:${dot};white-space:nowrap">${label}</span>
+        </div>`;
+    }
+
+    html += `</div>`;
+    resultEl.innerHTML = html;
+
+    if (events_created > 0) showToast(`${events_created} event${events_created > 1 ? "s" : ""} created in Google Calendar`);
+  } catch(e) {
+    resultEl.innerHTML = `<div class="card" style="margin-top:1rem"><div class="card-body" style="color:var(--red)">Error: ${esc(e.message)}</div></div>`;
+  }
 }
 
 async function sendWaTest() {

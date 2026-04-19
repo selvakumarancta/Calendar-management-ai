@@ -184,3 +184,91 @@ async def whatsapp_event_history(
                 }
             )
     return {"events": events, "total": len(events)}
+
+
+# ---------------------------------------------------------------------------
+# POST — Replay previous WhatsApp messages (authenticated)
+# ---------------------------------------------------------------------------
+
+
+@whatsapp_router.post(
+    "/whatsapp/replay",
+    summary="Replay previous WhatsApp messages to create calendar events",
+    tags=["WhatsApp"],
+)
+async def whatsapp_replay(
+    request: Request,
+    current_user=Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Accepts a list of previous WhatsApp message texts and processes each
+    one for meeting commitments, creating Google Calendar events automatically.
+
+    Request body:
+        {
+            "messages": [
+                {"text": "...", "from": "919876543210"},
+                ...
+            ],
+            "from_phone": "919876543210"   (optional default sender)
+        }
+    """
+    from src.infrastructure.whatsapp.webhook_adapter import WhatsAppMessage
+
+    body = await request.json()
+    messages_input = body.get("messages", [])
+    default_phone = body.get("from_phone", "replay")
+
+    if not messages_input:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="messages list is required and must not be empty",
+        )
+
+    svc = container.whatsapp_intelligence_service()
+    results = []
+
+    for i, item in enumerate(messages_input):
+        text = item.get("text", "").strip() if isinstance(item, dict) else str(item).strip()
+        from_phone = item.get("from", default_phone) if isinstance(item, dict) else default_phone
+
+        if not text:
+            continue
+
+        msg = WhatsAppMessage(
+            message_id=f"replay_{i}_{id(text)}",
+            from_phone=from_phone,
+            display_phone=from_phone,
+            text=text,
+            timestamp=0,
+            phone_number_id="replay",
+        )
+
+        result = await svc.process_message(msg)
+        results.append(
+            {
+                "index": i,
+                "text": text[:100] + ("…" if len(text) > 100 else ""),
+                "has_meeting": result.has_meeting,
+                "event_created": result.event_created,
+                "event_title": result.event_title,
+                "event_start": result.event_start,
+                "event_end": result.event_end,
+                "google_event_id": result.google_event_id,
+                "error": result.error,
+            }
+        )
+        logger.info(
+            "Replay msg[%d] '%s…' → has_meeting=%s event_created=%s",
+            i, text[:50], result.has_meeting, result.event_created,
+        )
+
+    created = sum(1 for r in results if r["event_created"])
+    detected = sum(1 for r in results if r["has_meeting"])
+    return {
+        "processed": len(results),
+        "meetings_detected": detected,
+        "events_created": created,
+        "results": results,
+    }
