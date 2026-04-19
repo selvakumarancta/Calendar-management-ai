@@ -206,6 +206,7 @@ function switchView(name) {
   if (name === "settings") loadSettings();
   if (name === "email") loadEmailView();
   if (name === "scheduling") loadSchedulingView();
+  if (name === "whatsapp") loadWhatsAppView();
 }
 
 // ── Quick Chat (from quick-action buttons) ─────────────────────
@@ -2269,4 +2270,230 @@ function showToast(msg, type = "success") {
   toast.classList.add("visible");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("visible"), 3000);
+}
+
+// ── WhatsApp ───────────────────────────────────────────────────
+
+function loadWhatsAppView() {
+  // Health-check the webhook endpoint to update the status pill
+  fetch("/api/v1/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=calendar-agent-whatsapp&hub.challenge=ping", { method: "GET" })
+    .then(r => {
+      const pill = document.getElementById("wa-status-pill");
+      if (r.ok) {
+        pill.style.background = "var(--green-soft)"; pill.style.color = "var(--green)";
+        pill.textContent = "● Webhook Active";
+      } else {
+        pill.style.background = "rgba(239,68,68,.1)"; pill.style.color = "var(--red)";
+        pill.textContent = "● Webhook Error";
+      }
+    })
+    .catch(() => {
+      const pill = document.getElementById("wa-status-pill");
+      pill.style.background = "rgba(239,68,68,.1)"; pill.style.color = "var(--red)";
+      pill.textContent = "● Offline";
+    });
+
+  // Pre-load history count for the badge
+  if (token) {
+    api("GET", "/api/v1/webhooks/whatsapp/events?limit=50")
+      .then(data => {
+        const cnt = (data.events || []).length;
+        const badge = document.getElementById("wa-history-count");
+        badge.textContent = cnt;
+        badge.style.display = cnt ? "inline-flex" : "none";
+      })
+      .catch(() => {});
+  }
+}
+
+function switchWaTab(name) {
+  document.querySelectorAll("[data-watab]").forEach(t => t.classList.remove("active"));
+  document.querySelector(`[data-watab='${name}']`).classList.add("active");
+  ["test", "setup", "verify", "history"].forEach(n => {
+    document.getElementById(`wa-${n}-panel`).style.display = n === name ? "" : "none";
+  });
+  if (name === "history") loadWaHistory();
+}
+
+const WA_PRESETS = [
+  "Team standup confirmed for Monday 28 April at 10am",
+  "Let's do a 30‑min intro call on Thursday 24 April at 3pm IST",
+  "Quarterly review scheduled for May 1 2026 at 2pm with all hands",
+  "Coffee chat tomorrow at 9am — works for you?",
+];
+let _waPresetIdx = 0;
+function loadWaPresets() {
+  document.getElementById("wa-msg-text").value = WA_PRESETS[_waPresetIdx % WA_PRESETS.length];
+  _waPresetIdx++;
+}
+
+async function sendWaTest() {
+  const phone = document.getElementById("wa-from-phone").value.trim() || "919876543210";
+  const text  = document.getElementById("wa-msg-text").value.trim();
+  if (!text) { showToast("Enter a message first", "error"); return; }
+
+  // Show chat preview with outgoing bubble
+  document.getElementById("wa-chat-preview").style.display = "block";
+  document.getElementById("wa-chat-out").textContent = text;
+  document.getElementById("wa-chat-in").style.display = "none";
+  document.getElementById("wa-test-result").innerHTML =
+    '<div class="empty-state" style="padding:1rem">⏳ Processing…</div>';
+
+  const payload = {
+    entry: [{
+      changes: [{
+        value: {
+          metadata: { phone_number_id: "1027521083786104" },
+          messages: [{
+            type: "text",
+            id: "test_" + Date.now(),
+            from: phone,
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            text: { body: text }
+          }]
+        }
+      }]
+    }]
+  };
+
+  try {
+    const resp = await fetch("/api/v1/webhooks/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    renderWaTestResult(data, text);
+  } catch (e) {
+    document.getElementById("wa-test-result").innerHTML =
+      `<div class="card" style="margin-top:1rem"><div class="card-body"><span style="color:var(--red)">Error: ${esc(e.message)}</span></div></div>`;
+  }
+}
+
+function renderWaTestResult(data, sentText) {
+  const res = data.results?.[0] || {};
+  const detected    = res.has_meeting || res.detected;
+  const created     = res.event_created;
+  const title       = res.event_title || "—";
+  const start       = res.event_start ? new Date(res.event_start).toLocaleString() : "—";
+  const googleId    = res.google_event_id || res.event_id || "—";
+
+  // Update nav badge
+  if (created) {
+    const badge = document.getElementById("nav-wa-badge");
+    badge.style.display = "inline-flex";
+    badge.textContent = "✓";
+    // refresh history count badge
+    if (token) api("GET", "/api/v1/webhooks/whatsapp/events?limit=50")
+      .then(d => { const b = document.getElementById("wa-history-count"); const n = (d.events||[]).length; b.textContent = n; b.style.display = n ? "inline-flex" : "none"; })
+      .catch(() => {});
+  }
+
+  // Chat reply bubble
+  if (detected) {
+    const inEl = document.getElementById("wa-chat-in");
+    const inText = document.getElementById("wa-chat-in-text");
+    inEl.style.display = "block";
+    inText.textContent = created
+      ? `✅ Got it! I've added "${title}" to your calendar.`
+      : "📅 I detected a meeting commitment but couldn't auto-create the event.";
+  }
+
+  let pillHtml = "";
+  if (created) {
+    pillHtml = `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--green-soft);color:var(--green);border:1px solid var(--green)"><span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block"></span>Event Created in Google Calendar ✓</span>`;
+  } else if (detected) {
+    pillHtml = `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:rgba(227,179,65,.1);color:#e3b341;border:1px solid rgba(227,179,65,.4)"><span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block"></span>Meeting Detected · Confidence too low or no clear date/time — not auto-created</span>`;
+  } else {
+    pillHtml = `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:rgba(239,68,68,.08);color:var(--red);border:1px solid rgba(239,68,68,.3)"><span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block"></span>No meeting commitment detected</span>`;
+  }
+
+  let eventCard = "";
+  if (created) {
+    eventCard = `
+      <div style="background:var(--green-soft);border:1px solid var(--green);border-radius:8px;padding:14px;margin-top:10px">
+        <div style="color:var(--green);font-size:.85rem;font-weight:600;margin-bottom:8px">📅 Calendar Event Created</div>
+        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Title</span><span>${esc(title)}</span></div>
+        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Start</span><span>${esc(start)}</span></div>
+        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Google ID</span><span style="font-family:monospace;font-size:.8rem;color:var(--accent)">${esc(googleId)}</span></div>
+      </div>`;
+  }
+
+  document.getElementById("wa-test-result").innerHTML = `
+    <div style="margin-top:1rem">${pillHtml}${eventCard}</div>
+    <details style="margin-top:.75rem">
+      <summary style="cursor:pointer;font-size:.8rem;color:var(--text2);padding:.25rem 0">Raw API response</summary>
+      <pre style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:.75rem;overflow-x:auto;margin-top:.4rem">${esc(JSON.stringify(data, null, 2))}</pre>
+    </details>`;
+}
+
+async function testWaVerify() {
+  const token = document.getElementById("wa-verify-token").value.trim();
+  const resultEl = document.getElementById("wa-verify-result");
+  resultEl.innerHTML = '<div class="empty-state" style="padding:.75rem">⏳ Testing…</div>';
+  try {
+    const url = `/api/v1/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(token)}&hub.challenge=CHALLENGE_12345`;
+    const resp = await fetch(url);
+    const body = await resp.text();
+    const ok = resp.ok;
+    resultEl.innerHTML = `
+      <div style="margin-top:1rem">
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;${ok ? "background:var(--green-soft);color:var(--green);border:1px solid var(--green)" : "background:rgba(239,68,68,.08);color:var(--red);border:1px solid rgba(239,68,68,.3)"}">
+          <span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block"></span>
+          ${ok ? "Verified ✓ — challenge echoed back" : "Failed · HTTP " + resp.status}
+        </span>
+        <pre style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:.8rem;margin-top:.75rem">HTTP ${resp.status}\nBody: ${esc(body)}</pre>
+      </div>`;
+  } catch (e) {
+    resultEl.innerHTML = `<div style="margin-top:1rem;color:var(--red);font-size:.85rem">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function copyWaCallback() {
+  const val = document.getElementById("wa-callback-url").value;
+  navigator.clipboard.writeText(val).then(() => showToast("Callback URL copied!"));
+}
+
+async function loadWaHistory() {
+  const listEl = document.getElementById("wa-history-list");
+  listEl.innerHTML = '<div class="empty-state" style="padding:1.5rem">⏳ Loading events…</div>';
+  try {
+    const data = await api("GET", "/api/v1/webhooks/whatsapp/events?limit=30");
+    const events = data.events || [];
+
+    // Update badge
+    const badge = document.getElementById("wa-history-count");
+    badge.textContent = events.length;
+    badge.style.display = events.length ? "inline-flex" : "none";
+
+    if (!events.length) {
+      listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No events yet. Send a WhatsApp message with a meeting time to create your first event.</div>';
+      return;
+    }
+
+    listEl.innerHTML = events.map(ev => {
+      const start = ev.start_time ? new Date(ev.start_time) : null;
+      const created = ev.created_at ? new Date(ev.created_at) : null;
+      const isGoogle = ev.google_event_id && !ev.google_event_id.includes("-");
+      const googleLink = isGoogle
+        ? `<a href="https://calendar.google.com/calendar/event?eid=${ev.google_event_id}" target="_blank" style="color:var(--accent);font-size:.78rem">Open in Google Calendar ↗</a>`
+        : `<span style="font-size:.78rem;color:var(--text2);font-family:monospace">${esc(ev.google_event_id || "local")}</span>`;
+
+      return `
+        <div class="email-item" style="padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:.35rem">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+            <div style="font-weight:600;font-size:.95rem;color:var(--text1)">${esc(ev.title)}</div>
+            <div style="font-size:.78rem;color:var(--text2);white-space:nowrap;margin-top:.15rem">${created ? fmtRelativeTime(created.toISOString()) : "—"}</div>
+          </div>
+          ${ev.description ? `<div style="font-size:.8rem;color:var(--text2);line-height:1.4">${esc(ev.description.substring(0, 160))}${ev.description.length > 160 ? "…" : ""}</div>` : ""}
+          <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-top:.2rem">
+            ${start ? `<span style="display:flex;align-items:center;gap:.3rem;font-size:.82rem;color:var(--text2)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${start.toLocaleString(undefined, {weekday:"short", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"})}</span>` : ""}
+            ${ev.location ? `<span style="font-size:.82rem;color:var(--text2)">📍 ${esc(ev.location)}</span>` : ""}
+            <div style="margin-left:auto">${googleLink}</div>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`;
+  }
 }

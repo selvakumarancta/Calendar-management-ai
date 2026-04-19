@@ -2,8 +2,9 @@
 WhatsApp Webhook Routes — handles Meta Cloud API webhook events.
 
 Two endpoints:
-  GET  /api/v1/webhooks/whatsapp  — webhook verification challenge
-  POST /api/v1/webhooks/whatsapp  — inbound message events
+  GET  /api/v1/webhooks/whatsapp          — webhook verification challenge
+  POST /api/v1/webhooks/whatsapp          — inbound message events
+  GET  /api/v1/webhooks/whatsapp/events   — history of WhatsApp-created events (auth required)
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 
-from src.api.dependencies import get_container
+from src.api.dependencies import get_container, get_current_user
 from src.config.container import Container
 
 logger = logging.getLogger("calendar_agent.whatsapp_routes")
@@ -124,3 +125,58 @@ async def whatsapp_webhook(
             )
 
     return {"status": "ok", "processed": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# GET — WhatsApp event history (authenticated)
+# ---------------------------------------------------------------------------
+
+
+@whatsapp_router.get(
+    "/whatsapp/events",
+    summary="WhatsApp-created calendar events",
+    tags=["WhatsApp"],
+)
+async def whatsapp_event_history(
+    limit: int = Query(20, ge=1, le=100),
+    current_user=Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Returns recent calendar events created via WhatsApp messages,
+    newest first. Requires JWT authentication.
+    """
+    from sqlalchemy import text
+
+    db = container.database()
+    async with db.session_factory() as session:
+        rows = await session.execute(
+            text(
+                """
+                SELECT id, title, description, location,
+                       start_time, end_time, is_all_day,
+                       provider_event_id, created_at
+                FROM calendar_events
+                WHERE user_id = :uid
+                ORDER BY created_at DESC
+                LIMIT :lim
+                """
+            ),
+            {"uid": str(current_user.id).replace("-", ""), "lim": limit},
+        )
+        events = []
+        for row in rows.fetchall():
+            events.append(
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "description": row[2],
+                    "location": row[3],
+                    "start_time": row[4],
+                    "end_time": row[5],
+                    "is_all_day": bool(row[6]),
+                    "google_event_id": row[7],
+                    "created_at": row[8],
+                }
+            )
+    return {"events": events, "total": len(events)}

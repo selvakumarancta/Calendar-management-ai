@@ -114,7 +114,7 @@ class MessageHookService:
 
         should_create = (
             auto_create
-            and confidence >= self._auto_threshold
+            and confidence >= (self._auto_threshold if source != "whatsapp" else min(self._auto_threshold, 0.75))
             and extraction.get("proposed_start")
         )
 
