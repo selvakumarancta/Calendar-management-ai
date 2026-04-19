@@ -40,9 +40,28 @@ async def whatsapp_verify(
     container: Container = Depends(get_container),
 ) -> PlainTextResponse:
     """
-    Meta calls this GET endpoint when you register the webhook URL in
-    the WhatsApp Business Platform dashboard.
+    Meta calls this GET endpoint when you register the webhook URL.
+
+    Accepts the verify_token from any enabled org config OR the global
+    .env verify_token — whichever matches first.
     """
+    from sqlalchemy import text as _sql
+
+    # Check org-level verify tokens first
+    if hub_mode == "subscribe" and hub_verify_token:
+        db = container.database()
+        async with db.session_factory() as _session:
+            r = await _session.execute(
+                _sql(
+                    "SELECT 1 FROM org_whatsapp_configs "
+                    "WHERE verify_token = :vt AND enabled = 1 LIMIT 1"
+                ),
+                {"vt": hub_verify_token},
+            )
+            if r.fetchone():
+                return PlainTextResponse(content=hub_challenge)
+
+    # Fallback: global .env verify token
     adapter = container.whatsapp_webhook_adapter()
     challenge = adapter.verify_challenge(hub_mode, hub_verify_token, hub_challenge)
     if challenge is None:
@@ -72,18 +91,25 @@ async def whatsapp_webhook(
     """
     Receives inbound WhatsApp messages from Meta Cloud API.
 
+    Multi-tenant dispatch: the phone_number_id in the Meta payload is used
+    to look up the correct org's WhatsApp config from org_whatsapp_configs.
+    Falls back to the global .env config if no org row is found (single-tenant
+    / dev mode).
+
     For each text message:
     1. Detects meeting commitments using AI
     2. Creates a calendar event automatically
     3. Syncs the event to Google Calendar
     4. Sends a WhatsApp reply to the sender confirming the event
     """
+    from sqlalchemy import text as _sql
+
     raw_body = await request.body()
     payload = await request.json()
 
     adapter = container.whatsapp_webhook_adapter()
 
-    # Optional HMAC verification
+    # Optional HMAC verification (global secret; org-level checked below)
     if not adapter.verify_signature(raw_body, x_hub_signature_256):
         logger.warning("WhatsApp webhook signature mismatch — rejecting")
         raise HTTPException(
@@ -95,11 +121,69 @@ async def whatsapp_webhook(
     messages = adapter.parse_messages(payload)
 
     if not messages:
-        # Meta sends status updates (delivered, read) — acknowledge silently
         return {"status": "ok", "processed": 0}
 
-    # Process each message through the intelligence service
-    svc = container.whatsapp_intelligence_service()
+    # --- Multi-tenant: resolve org config by phone_number_id ---
+    incoming_phone_id = (
+        payload.get("entry", [{}])[0]
+        .get("changes", [{}])[0]
+        .get("value", {})
+        .get("metadata", {})
+        .get("phone_number_id", "")
+    )
+
+    org_cfg = None
+    if incoming_phone_id:
+        db = container.database()
+        async with db.session_factory() as _session:
+            r = await _session.execute(
+                _sql(
+                    "SELECT org_id, access_token, phone_number_id, verify_token, "
+                    "auto_reply, enabled "
+                    "FROM org_whatsapp_configs "
+                    "WHERE phone_number_id = :pid AND enabled = 1 LIMIT 1"
+                ),
+                {"pid": incoming_phone_id},
+            )
+            row = r.fetchone()
+            if row:
+                org_cfg = {
+                    "org_id": row[0],
+                    "access_token": row[1],
+                    "phone_number_id": row[2],
+                    "verify_token": row[3],
+                    "auto_reply": bool(row[4]),
+                }
+
+    if org_cfg:
+        # Build a dedicated service instance with the org's credentials
+        from src.application.services.whatsapp_intelligence_service import (
+            WhatsAppIntelligenceService,
+        )
+
+        db = container.database()
+        svc = WhatsAppIntelligenceService(
+            message_hook_service=container.message_hook_service(),
+            calendar_adapter=container.calendar_adapter(),
+            db_session_factory=db.session_factory,
+            whatsapp_adapter=adapter,
+            access_token=org_cfg["access_token"],
+            phone_number_id=org_cfg["phone_number_id"],
+            auto_reply=org_cfg["auto_reply"],
+        )
+        logger.info(
+            "WhatsApp webhook: dispatching to org %s (phone_id=%s)",
+            org_cfg["org_id"],
+            incoming_phone_id,
+        )
+    else:
+        # Fallback: single-tenant / dev mode using global .env config
+        svc = container.whatsapp_intelligence_service()
+        logger.debug(
+            "WhatsApp webhook: no org config for phone_id=%s, using global config",
+            incoming_phone_id,
+        )
+
     results = []
     for msg in messages:
         logger.info(

@@ -139,3 +139,47 @@ class OrgLicenseConfigModel(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class OrgWhatsAppConfigModel(Base):
+    """
+    Per-organization WhatsApp configuration.
+
+    Stored in DB (not .env) so Super Admin / Org Owner can manage
+    credentials at runtime without server restarts.
+    One row per organization. phone_number_id is indexed for fast
+    webhook dispatch (Meta sends this in every payload).
+    """
+
+    __tablename__ = "org_whatsapp_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, nullable=False, unique=True, index=True
+    )
+    # Meta Cloud API identifiers
+    phone_number_id: Mapped[str] = mapped_column(
+        String(60), nullable=False, default="", index=True
+    )
+    display_phone: Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    # Stored as plaintext here; wrap with encryption-at-rest (Fernet/KMS) in prod
+    access_token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    verify_token: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="calendar-agent-whatsapp"
+    )
+    webhook_secret: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    auto_reply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )

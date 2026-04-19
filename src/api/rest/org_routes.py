@@ -1379,3 +1379,177 @@ async def list_org_events(
             "X-Page-Size": str(page_size),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp integration config — OWNER/ADMIN only
+# ---------------------------------------------------------------------------
+
+
+class WhatsAppConfigRequest(BaseModel):
+    phone_number_id: str = Field(..., min_length=1, max_length=60)
+    display_phone: str = Field("", max_length=30)
+    access_token: str = Field(..., min_length=1)
+    verify_token: str = Field("calendar-agent-whatsapp", min_length=4, max_length=255)
+    webhook_secret: str = Field("", max_length=255)
+    auto_reply: bool = True
+    enabled: bool = True
+
+
+class WhatsAppConfigResponse(BaseModel):
+    org_id: str
+    phone_number_id: str
+    display_phone: str
+    verify_token: str
+    auto_reply: bool
+    enabled: bool
+    has_access_token: bool  # never expose the raw token in responses
+    updated_at: str
+
+
+@org_router.get(
+    "/{org_id}/whatsapp",
+    response_model=WhatsAppConfigResponse,
+    summary="Get WhatsApp config for org",
+    tags=["WhatsApp Admin"],
+)
+async def get_whatsapp_config(
+    org_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> WhatsAppConfigResponse:
+    """Return the WhatsApp configuration for an org. OWNER/ADMIN only."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.org_models import OrgWhatsAppConfigModel
+
+    svc = _build_org_service(container, session)
+    try:
+        await svc._require_role(org_id, current_user.id, {OrgRole.OWNER, OrgRole.ADMIN})
+    except InsufficientPermissionsError as e:
+        raise HTTPException(status_code=403, detail=e.message)
+
+    result = await session.execute(
+        select(OrgWhatsAppConfigModel).where(
+            OrgWhatsAppConfigModel.org_id == org_id
+        )
+    )
+    cfg = result.scalar_one_or_none()
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="WhatsApp not configured for this org")
+
+    return WhatsAppConfigResponse(
+        org_id=str(cfg.org_id),
+        phone_number_id=cfg.phone_number_id,
+        display_phone=cfg.display_phone,
+        verify_token=cfg.verify_token,
+        auto_reply=cfg.auto_reply,
+        enabled=cfg.enabled,
+        has_access_token=bool(cfg.access_token),
+        updated_at=cfg.updated_at.isoformat(),
+    )
+
+
+@org_router.put(
+    "/{org_id}/whatsapp",
+    response_model=WhatsAppConfigResponse,
+    summary="Save / update WhatsApp config for org",
+    tags=["WhatsApp Admin"],
+)
+async def upsert_whatsapp_config(
+    org_id: UUID,
+    body: WhatsAppConfigRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> WhatsAppConfigResponse:
+    """
+    Create or update the WhatsApp integration for an org.
+
+    Only OWNER or ADMIN of the org (or platform Super Admin) may call this.
+    The raw access_token is stored in the DB; apply column-level encryption
+    in production (Fernet, AWS KMS, or Vault).
+    """
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.org_models import OrgWhatsAppConfigModel
+
+    svc = _build_org_service(container, session)
+    try:
+        await svc._require_role(org_id, current_user.id, {OrgRole.OWNER, OrgRole.ADMIN})
+    except InsufficientPermissionsError as e:
+        raise HTTPException(status_code=403, detail=e.message)
+
+    result = await session.execute(
+        select(OrgWhatsAppConfigModel).where(OrgWhatsAppConfigModel.org_id == org_id)
+    )
+    cfg = result.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if cfg is None:
+        cfg = OrgWhatsAppConfigModel(
+            id=_uuid.uuid4(),
+            org_id=org_id,
+            created_by=current_user.id,
+            created_at=now,
+        )
+        session.add(cfg)
+
+    cfg.phone_number_id = body.phone_number_id
+    cfg.display_phone = body.display_phone
+    cfg.access_token = body.access_token
+    cfg.verify_token = body.verify_token
+    cfg.webhook_secret = body.webhook_secret
+    cfg.auto_reply = body.auto_reply
+    cfg.enabled = body.enabled
+    cfg.updated_at = now
+
+    await session.commit()
+    await session.refresh(cfg)
+
+    return WhatsAppConfigResponse(
+        org_id=str(cfg.org_id),
+        phone_number_id=cfg.phone_number_id,
+        display_phone=cfg.display_phone,
+        verify_token=cfg.verify_token,
+        auto_reply=cfg.auto_reply,
+        enabled=cfg.enabled,
+        has_access_token=bool(cfg.access_token),
+        updated_at=cfg.updated_at.isoformat(),
+    )
+
+
+@org_router.delete(
+    "/{org_id}/whatsapp",
+    status_code=204,
+    summary="Remove WhatsApp config for org",
+    tags=["WhatsApp Admin"],
+)
+async def delete_whatsapp_config(
+    org_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> None:
+    """Delete the WhatsApp integration for an org. OWNER only."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.org_models import OrgWhatsAppConfigModel
+
+    svc = _build_org_service(container, session)
+    try:
+        await svc._require_role(org_id, current_user.id, {OrgRole.OWNER})
+    except InsufficientPermissionsError as e:
+        raise HTTPException(status_code=403, detail=e.message)
+
+    result = await session.execute(
+        select(OrgWhatsAppConfigModel).where(OrgWhatsAppConfigModel.org_id == org_id)
+    )
+    cfg = result.scalar_one_or_none()
+    if cfg:
+        await session.delete(cfg)
+        await session.commit()
