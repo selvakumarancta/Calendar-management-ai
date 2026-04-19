@@ -43,10 +43,10 @@ class WhatsAppIntelligenceService:
 
     def __init__(
         self,
-        message_hook_service: Any,          # MessageHookService
-        calendar_adapter: Any,              # ProviderAwareCalendarAdapter
+        message_hook_service: Any,  # MessageHookService
+        calendar_adapter: Any,  # ProviderAwareCalendarAdapter
         db_session_factory: Any,
-        whatsapp_adapter: Any,              # WhatsAppWebhookAdapter
+        whatsapp_adapter: Any,  # WhatsAppWebhookAdapter
         access_token: str = "",
         phone_number_id: str = "",
         auto_reply: bool = True,
@@ -121,22 +121,18 @@ class WhatsAppIntelligenceService:
         try:
             user_id = await self._resolve_user_id(msg.from_phone)
 
-            # Use MessageHookService to detect commitment
+            # Use MessageHookService to detect commitment and auto-create event
             hook_result = await self._hook.process_message(
-                text=msg.text,
                 user_id=user_id,
+                message_text=msg.text,
+                sender=msg.display_phone,
                 source="whatsapp",
-                sender_phone=msg.from_phone,
                 user_timezone=user_timezone,
-                now_utc=datetime.fromtimestamp(msg.timestamp, tz=timezone.utc)
-                if msg.timestamp
-                else datetime.now(timezone.utc),
+                auto_create=True,
             )
 
-            if not hook_result.get("has_commitment"):
-                logger.debug(
-                    "No meeting commitment in WhatsApp msg %s", msg.message_id
-                )
+            if not hook_result.get("detected"):
+                logger.debug("No meeting commitment in WhatsApp msg %s", msg.message_id)
                 return result
 
             result.has_meeting = True
@@ -144,12 +140,12 @@ class WhatsAppIntelligenceService:
             result.event_start = hook_result.get("proposed_start")
 
             # Retrieve event created by MessageHookService (if auto-created)
-            created_event = hook_result.get("created_event")
-            if created_event:
+            created_event = hook_result.get("created_event") or hook_result.get("event")
+            if created_event or hook_result.get("action") == "created":
                 result.event_created = True
                 result.google_event_id = getattr(
                     created_event, "provider_event_id", None
-                )
+                ) if created_event else hook_result.get("event_id")
                 logger.info(
                     "WhatsApp msg %s → created event '%s' (google_id=%s)",
                     msg.message_id,

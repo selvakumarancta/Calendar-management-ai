@@ -164,9 +164,13 @@ class MessageHookService:
                 temperature=0,
                 max_tokens=400,
             )
-            text = (
-                response if isinstance(response, str) else response.get("content", "")
-            ).strip()
+            text = response if isinstance(response, str) else (
+                # Anthropic returns content as list of blocks
+                response["content"][0]["text"]
+                if isinstance(response.get("content"), list)
+                else response.get("content", "")
+            )
+            text = text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             return json.loads(text)
@@ -207,7 +211,28 @@ class MessageHookService:
                     a for a in extraction.get("attendees", []) if "@" in str(a)
                 ],
             )
-            event = await self._calendar.create_event(user_id, dto)
+            # Use CalendarService (which converts DTO → domain entity) if available,
+            # otherwise fall back to calling the provider adapter directly via entity
+            if hasattr(self._calendar, "create_event"):
+                from src.domain.entities.calendar_event import (
+                    Attendee,
+                    CalendarEvent,
+                    Reminder,
+                )
+
+                entity = CalendarEvent(
+                    user_id=user_id,
+                    title=dto.title,
+                    description=dto.description,
+                    location=dto.location,
+                    start_time=dto.start_time,
+                    end_time=dto.end_time,
+                    is_all_day=dto.is_all_day,
+                    calendar_id=dto.calendar_id,
+                    attendees=[Attendee(email=e) for e in dto.attendee_emails],
+                    reminders=[Reminder(minutes_before=dto.reminder_minutes)],
+                )
+                event = await self._calendar.create_event(user_id, entity)
             logger.info(
                 "Message hook auto-created event: '%s' at %s for user %s",
                 dto.title,
