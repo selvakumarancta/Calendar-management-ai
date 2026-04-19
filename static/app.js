@@ -2601,9 +2601,10 @@ async function loadWaHistory() {
             <span style="color:var(--text2);font-weight:500">To</span>
             <span style="color:var(--text1)">${fmtDT(ev.end_time)}</span>
             ${ev.location ? `<span style="color:var(--text2);font-weight:500">Where</span><span style="color:var(--text1)">📍 ${esc(ev.location)}</span>` : ""}
+            ${(() => { const m = (ev.description || "").match(/📱 From WhatsApp:\s*(\+?\d+)/); return m ? `<span style="color:var(--text2);font-weight:500">Sender</span><span style="color:var(--text1)">📱 ${esc(m[1])}</span>` : ""; })()}
           </div>
 
-          ${ev.description ? `<div style="font-size:.8rem;color:var(--text2);line-height:1.45;margin-bottom:.4rem">${esc(ev.description.substring(0, 180))}${ev.description.length > 180 ? "…" : ""}</div>` : ""}
+          ${ev.description ? `<div style="font-size:.8rem;color:var(--text2);line-height:1.45;margin-bottom:.4rem">${esc(ev.description.replace(/\n+📱 From WhatsApp:.*$/s,"").substring(0, 180))}${ev.description.replace(/\n+📱 From WhatsApp:.*$/s,"").length > 180 ? "…" : ""}</div>` : ""}
 
           <div style="display:flex;align-items:center;justify-content:flex-end">${googleLink}</div>
         </div>`;
