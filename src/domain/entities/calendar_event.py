@@ -75,6 +75,9 @@ class CalendarEvent:
     reminders: list[Reminder] = field(default_factory=list)
     recurrence: Recurrence | None = None
 
+    # Where this event was created from: 'whatsapp', 'gmail', 'outlook', 'manual', 'agent'
+    source: str = "manual"
+
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

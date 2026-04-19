@@ -87,6 +87,7 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
             reminders=reminders,
             created_at=row.created_at or datetime.now(tz=UTC),
             updated_at=row.updated_at or datetime.now(tz=UTC),
+            source=getattr(row, "source", "manual") or "manual",
         )
 
     @staticmethod
@@ -115,6 +116,7 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
             ),
             "attendees_json": json.dumps(attendees),
             "reminders_json": json.dumps(reminders),
+            "source": getattr(event, "source", "manual") or "manual",
         }
 
     # ---- DB persistence layer -----------------------------------------

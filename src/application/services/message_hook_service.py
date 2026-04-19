@@ -133,7 +133,7 @@ class MessageHookService:
 
         if should_create:
             create_result = await self._create_event_from_extraction(
-                user_id, extraction
+                user_id, extraction, source=source
             )
             result.update(create_result)
 
@@ -183,7 +183,7 @@ class MessageHookService:
             return {"has_commitment": False, "confidence": 0}
 
     async def _create_event_from_extraction(
-        self, user_id: uuid.UUID, extraction: dict
+        self, user_id: uuid.UUID, extraction: dict, source: str = "manual"
     ) -> dict:
         """Create a calendar event from extracted commitment data."""
         if not self._calendar:
@@ -241,6 +241,7 @@ class MessageHookService:
                 calendar_id=dto.calendar_id,
                 attendees=[Attendee(email=e) for e in dto.attendee_emails],
                 reminders=[Reminder(minutes_before=dto.reminder_minutes)],
+                source=source,
             )
             event = await self._calendar.create_event(user_id, entity)
             logger.info(

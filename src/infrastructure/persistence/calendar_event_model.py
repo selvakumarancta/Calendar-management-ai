@@ -40,6 +40,9 @@ class CalendarEventModel(Base):
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="confirmed")
 
+    # Source of this event: 'whatsapp', 'gmail', 'outlook', 'manual', 'agent'
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+
     # JSON serialized
     attendees_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     reminders_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")

@@ -28,6 +28,7 @@ class WhatsAppProcessResult:
     event_created: bool
     event_title: str | None
     event_start: str | None
+    event_end: str | None
     google_event_id: str | None
     reply_sent: bool
     error: str | None
@@ -127,6 +128,7 @@ class WhatsAppIntelligenceService:
             event_created=False,
             event_title=None,
             event_start=None,
+            event_end=None,
             google_event_id=None,
             reply_sent=False,
             error=None,
@@ -160,12 +162,18 @@ class WhatsAppIntelligenceService:
 
             result.has_meeting = True
             result.event_title = hook_result.get("event_summary")
-            result.event_start = hook_result.get("proposed_start")
+            result.event_start = hook_result.get("proposed_start") or hook_result.get("start")
+            result.event_end = hook_result.get("proposed_end") or hook_result.get("end")
 
             # Retrieve event created by MessageHookService (if auto-created)
             created_event = hook_result.get("created_event") or hook_result.get("event")
             if created_event or hook_result.get("action") == "created":
                 result.event_created = True
+                # Use precise start/end from the created event if available
+                if hook_result.get("start"):
+                    result.event_start = hook_result["start"]
+                if hook_result.get("end"):
+                    result.event_end = hook_result["end"]
                 result.google_event_id = (
                     getattr(created_event, "provider_event_id", None)
                     if created_event

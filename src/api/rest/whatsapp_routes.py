@@ -113,6 +113,8 @@ async def whatsapp_webhook(
                 "has_meeting": result.has_meeting,
                 "event_created": result.event_created,
                 "event_title": result.event_title,
+                "event_start": result.event_start,
+                "event_end": result.event_end,
                 "google_event_id": result.google_event_id,
                 "reply_sent": result.reply_sent,
             }
@@ -155,7 +157,8 @@ async def whatsapp_event_history(
                 """
                 SELECT id, title, description, location,
                        start_time, end_time, is_all_day,
-                       provider_event_id, created_at
+                       provider_event_id, created_at,
+                       COALESCE(source, 'manual') AS source
                 FROM calendar_events
                 WHERE user_id = :uid
                 ORDER BY created_at DESC
@@ -172,11 +175,12 @@ async def whatsapp_event_history(
                     "title": row[1],
                     "description": row[2],
                     "location": row[3],
-                    "start_time": row[4],
-                    "end_time": row[5],
+                    "start_time": str(row[4]) if row[4] else None,
+                    "end_time": str(row[5]) if row[5] else None,
                     "is_all_day": bool(row[6]),
                     "google_event_id": row[7],
-                    "created_at": row[8],
+                    "created_at": str(row[8]) if row[8] else None,
+                    "source": row[9] or "manual",
                 }
             )
     return {"events": events, "total": len(events)}

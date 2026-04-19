@@ -2377,7 +2377,6 @@ function renderWaTestResult(data, sentText) {
   const title       = res.event_title || "—";
   const start       = res.event_start ? new Date(res.event_start).toLocaleString() : "—";
   const googleId    = res.google_event_id || res.event_id || "—";
-
   // Update nav badge
   if (created) {
     const badge = document.getElementById("nav-wa-badge");
@@ -2410,12 +2409,18 @@ function renderWaTestResult(data, sentText) {
 
   let eventCard = "";
   if (created) {
+    const endRaw = res.end || res.event_end;
+    const endStr = endRaw ? new Date(endRaw).toLocaleString(undefined, {weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
+    const startFmt = res.event_start ? new Date(res.event_start).toLocaleString(undefined, {weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"}) : start;
     eventCard = `
       <div style="background:var(--green-soft);border:1px solid var(--green);border-radius:8px;padding:14px;margin-top:10px">
         <div style="color:var(--green);font-size:.85rem;font-weight:600;margin-bottom:8px">📅 Calendar Event Created</div>
-        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Title</span><span>${esc(title)}</span></div>
-        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Start</span><span>${esc(start)}</span></div>
-        <div style="display:flex;gap:8px;font-size:.85rem;margin:4px 0"><span style="color:var(--text2);min-width:80px">Google ID</span><span style="font-family:monospace;font-size:.8rem;color:var(--accent)">${esc(googleId)}</span></div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:.2rem .75rem;font-size:.85rem">
+          <span style="color:var(--text2)">Title</span><span>${esc(title)}</span>
+          <span style="color:var(--text2)">From</span><span>${startFmt}</span>
+          <span style="color:var(--text2)">To</span><span>${endStr}</span>
+          <span style="color:var(--text2)">Google ID</span><span style="font-family:monospace;font-size:.8rem;color:var(--accent)">${esc(googleId)}</span>
+        </div>
       </div>`;
   }
 
@@ -2467,30 +2472,62 @@ async function loadWaHistory() {
     badge.style.display = events.length ? "inline-flex" : "none";
 
     if (!events.length) {
-      listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No events yet. Send a WhatsApp message with a meeting time to create your first event.</div>';
+      listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No events yet. Send a message with a meeting time to create your first event.</div>';
       return;
     }
 
+    const SOURCE_META = {
+      whatsapp: { icon: "💬", label: "WhatsApp", bg: "#25d36615", color: "#25d366", border: "#25d36640" },
+      gmail:    { icon: "📧", label: "Gmail",    bg: "#ea433515", color: "#ea4335", border: "#ea433540" },
+      outlook:  { icon: "📨", label: "Outlook",  bg: "#0078d415", color: "#0078d4", border: "#0078d440" },
+      agent:    { icon: "🤖", label: "Agent",    bg: "rgba(99,102,241,.1)", color: "#6366f1", border: "rgba(99,102,241,.4)" },
+      manual:   { icon: "⚙️", label: "Manual",   bg: "var(--bg2)", color: "var(--text2)", border: "var(--border)" },
+    };
+
+    function fmtDT(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (isNaN(d)) return iso;
+      return d.toLocaleString(undefined, {
+        weekday: "short", month: "short", day: "numeric",
+        year: "numeric", hour: "2-digit", minute: "2-digit"
+      });
+    }
+
     listEl.innerHTML = events.map(ev => {
-      const start = ev.start_time ? new Date(ev.start_time) : null;
+      const src = (ev.source || "manual").toLowerCase();
+      const sm = SOURCE_META[src] || SOURCE_META.manual;
+      const isGoogleId = ev.google_event_id && !ev.google_event_id.startsWith("mem-") && ev.google_event_id.length > 8;
+      const googleLink = isGoogleId
+        ? `<a href="https://calendar.google.com/calendar/r/eventedit?eid=${encodeURIComponent(btoa(ev.google_event_id))}" target="_blank" rel="noopener" style="color:var(--accent);font-size:.78rem;text-decoration:none">↗ Open in Google Calendar</a>`
+        : `<span style="font-size:.75rem;color:var(--text2);font-family:monospace">${esc(ev.google_event_id || "local")}</span>`;
+
       const created = ev.created_at ? new Date(ev.created_at) : null;
-      const isGoogle = ev.google_event_id && !ev.google_event_id.includes("-");
-      const googleLink = isGoogle
-        ? `<a href="https://calendar.google.com/calendar/event?eid=${ev.google_event_id}" target="_blank" style="color:var(--accent);font-size:.78rem">Open in Google Calendar ↗</a>`
-        : `<span style="font-size:.78rem;color:var(--text2);font-family:monospace">${esc(ev.google_event_id || "local")}</span>`;
+      const relTime = created ? fmtRelativeTime(ev.created_at) : "—";
 
       return `
-        <div class="email-item" style="padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:.35rem">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-            <div style="font-weight:600;font-size:.95rem;color:var(--text1)">${esc(ev.title)}</div>
-            <div style="font-size:.78rem;color:var(--text2);white-space:nowrap;margin-top:.15rem">${created ? fmtRelativeTime(created.toISOString()) : "—"}</div>
+        <div style="padding:1rem 1.5rem;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.5rem">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:.95rem;color:var(--text1)">${esc(ev.title)}</span>
+              <span style="display:inline-flex;align-items:center;gap:.3rem;padding:2px 8px;border-radius:12px;font-size:.72rem;font-weight:600;background:${sm.bg};color:${sm.color};border:1px solid ${sm.border}">
+                ${sm.icon} ${sm.label}
+              </span>
+            </div>
+            <span style="font-size:.75rem;color:var(--text2);white-space:nowrap;flex-shrink:0">${relTime}</span>
           </div>
-          ${ev.description ? `<div style="font-size:.8rem;color:var(--text2);line-height:1.4">${esc(ev.description.substring(0, 160))}${ev.description.length > 160 ? "…" : ""}</div>` : ""}
-          <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-top:.2rem">
-            ${start ? `<span style="display:flex;align-items:center;gap:.3rem;font-size:.82rem;color:var(--text2)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${start.toLocaleString(undefined, {weekday:"short", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"})}</span>` : ""}
-            ${ev.location ? `<span style="font-size:.82rem;color:var(--text2)">📍 ${esc(ev.location)}</span>` : ""}
-            <div style="margin-left:auto">${googleLink}</div>
+
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:.25rem .75rem;font-size:.82rem;margin-bottom:.5rem;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:.5rem .75rem">
+            <span style="color:var(--text2);font-weight:500">From</span>
+            <span style="color:var(--text1)">${fmtDT(ev.start_time)}</span>
+            <span style="color:var(--text2);font-weight:500">To</span>
+            <span style="color:var(--text1)">${fmtDT(ev.end_time)}</span>
+            ${ev.location ? `<span style="color:var(--text2);font-weight:500">Where</span><span style="color:var(--text1)">📍 ${esc(ev.location)}</span>` : ""}
           </div>
+
+          ${ev.description ? `<div style="font-size:.8rem;color:var(--text2);line-height:1.45;margin-bottom:.4rem">${esc(ev.description.substring(0, 180))}${ev.description.length > 180 ? "…" : ""}</div>` : ""}
+
+          <div style="display:flex;align-items:center;justify-content:flex-end">${googleLink}</div>
         </div>`;
     }).join("");
   } catch (e) {
