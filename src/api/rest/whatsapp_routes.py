@@ -1,0 +1,126 @@
+"""
+WhatsApp Webhook Routes — handles Meta Cloud API webhook events.
+
+Two endpoints:
+  GET  /api/v1/webhooks/whatsapp  — webhook verification challenge
+  POST /api/v1/webhooks/whatsapp  — inbound message events
+"""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse
+
+from src.api.dependencies import get_container
+from src.config.container import Container
+
+logger = logging.getLogger("calendar_agent.whatsapp_routes")
+
+whatsapp_router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# GET — Meta webhook verification challenge
+# ---------------------------------------------------------------------------
+
+
+@whatsapp_router.get(
+    "/whatsapp",
+    response_class=PlainTextResponse,
+    summary="WhatsApp webhook verification",
+    include_in_schema=False,
+)
+async def whatsapp_verify(
+    hub_mode: str = Query("", alias="hub.mode"),
+    hub_verify_token: str = Query("", alias="hub.verify_token"),
+    hub_challenge: str = Query("", alias="hub.challenge"),
+    container: Container = Depends(get_container),
+) -> PlainTextResponse:
+    """
+    Meta calls this GET endpoint when you register the webhook URL in
+    the WhatsApp Business Platform dashboard.
+    """
+    adapter = container.whatsapp_webhook_adapter()
+    challenge = adapter.verify_challenge(hub_mode, hub_verify_token, hub_challenge)
+    if challenge is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid verification token",
+        )
+    return PlainTextResponse(content=challenge)
+
+
+# ---------------------------------------------------------------------------
+# POST — inbound WhatsApp messages
+# ---------------------------------------------------------------------------
+
+
+@whatsapp_router.post(
+    "/whatsapp",
+    status_code=status.HTTP_200_OK,
+    summary="WhatsApp inbound message webhook",
+    tags=["WhatsApp"],
+)
+async def whatsapp_webhook(
+    request: Request,
+    x_hub_signature_256: str = Header("", alias="X-Hub-Signature-256"),
+    container: Container = Depends(get_container),
+) -> dict:
+    """
+    Receives inbound WhatsApp messages from Meta Cloud API.
+
+    For each text message:
+    1. Detects meeting commitments using AI
+    2. Creates a calendar event automatically
+    3. Syncs the event to Google Calendar
+    4. Sends a WhatsApp reply to the sender confirming the event
+    """
+    raw_body = await request.body()
+    payload = await request.json()
+
+    adapter = container.whatsapp_webhook_adapter()
+
+    # Optional HMAC verification
+    if not adapter.verify_signature(raw_body, x_hub_signature_256):
+        logger.warning("WhatsApp webhook signature mismatch — rejecting")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signature",
+        )
+
+    # Parse messages from payload
+    messages = adapter.parse_messages(payload)
+
+    if not messages:
+        # Meta sends status updates (delivered, read) — acknowledge silently
+        return {"status": "ok", "processed": 0}
+
+    # Process each message through the intelligence service
+    svc = container.whatsapp_intelligence_service()
+    results = []
+    for msg in messages:
+        logger.info(
+            "Processing WhatsApp message from %s: %s", msg.from_phone, msg.text[:80]
+        )
+        result = await svc.process_message(msg)
+        results.append(
+            {
+                "message_id": result.message_id,
+                "from": result.from_phone,
+                "has_meeting": result.has_meeting,
+                "event_created": result.event_created,
+                "event_title": result.event_title,
+                "google_event_id": result.google_event_id,
+                "reply_sent": result.reply_sent,
+            }
+        )
+        if result.event_created:
+            logger.info(
+                "Event created from WhatsApp: '%s' (google_id=%s)",
+                result.event_title,
+                result.google_event_id,
+            )
+
+    return {"status": "ok", "processed": len(results), "results": results}

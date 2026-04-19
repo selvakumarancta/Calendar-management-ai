@@ -288,3 +288,114 @@ async def test_scheduling_guide_passed_to_llm_contains_event_day():
     user_message_content = next(m["content"] for m in messages if m["role"] == "user")
     # The user prompt should contain the Monday event day
     assert "Monday" in user_message_content
+
+
+# ---------------------------------------------------------------------------
+# generate_all_guides — emails without scheduling keywords fall back (line 228)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_email_samples_fallback_when_no_scheduling_keywords():
+    """Emails without scheduling keywords fall back to sent_emails[:8] (line 228)."""
+    llm = _make_llm()
+    svc = UserGuidesService(llm_adapter=llm, db_session_factory=_fake_session_factory())
+    non_scheduling_emails = [
+        {
+            "subject": "Invoice",
+            "body": "Please see attached invoice.",
+            "date": "2026-03-01",
+        }
+        for _ in range(5)
+    ]
+    # Should not raise — falls back to [:8] slice
+    scheduling, style = await svc.generate_all_guides(
+        user_id=USER_ID,
+        user_email=USER_EMAIL,
+        calendar_events=[],
+        sent_emails=non_scheduling_emails,
+    )
+    assert isinstance(scheduling, str)
+
+
+# ---------------------------------------------------------------------------
+# get_user_guides — database exception (lines 288-290)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_user_guides_returns_empty_on_db_error():
+    """Exception from DB.execute() is caught and returns ('', '') (lines 288-290)."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def broken_db():
+        class _BrokenSession:
+            async def execute(self, *_):
+                raise RuntimeError("DB exploded")
+
+        yield _BrokenSession()
+
+    svc = UserGuidesService(db_session_factory=broken_db)
+    result = await svc.get_user_guides(USER_ID)
+    assert result == ("", "")
+
+
+# ---------------------------------------------------------------------------
+# _save_guides — update-existing path (lines 322-324) and exception (335-336)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_guides_updates_existing_record():
+    """_save_guides updates an existing UserGuideModel row (lines 322-324)."""
+    existing_record = MagicMock()
+    existing_record.content = "old content"
+    existing_record.generated_at = None
+    existing_record.emails_analyzed = 0
+
+    class _UpdateSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def execute(self, *_):
+            result = MagicMock()
+            # Return existing record for both guide types
+            result.scalars.return_value.first.return_value = existing_record
+            return result
+
+        def add(self, *_):
+            pass
+
+        async def commit(self):
+            pass
+
+    svc = UserGuidesService(db_session_factory=lambda: _UpdateSession())
+    await svc._save_guides(USER_ID, "new sched guide", "new style guide", 5)
+    # existing_record was updated
+    assert existing_record.content == "new style guide"  # last iteration sets style
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_guides_exception_is_caught():
+    """Exception during _save_guides is caught, not raised (lines 335-336)."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def broken_db():
+        class _BrokenSave:
+            async def execute(self, *_):
+                raise RuntimeError("save exploded")
+
+        yield _BrokenSave()
+
+    svc = UserGuidesService(db_session_factory=broken_db)
+    # Should not raise
+    await svc._save_guides(USER_ID, "sched", "style", 3)

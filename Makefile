@@ -1,7 +1,9 @@
-.PHONY: help install dev test lint format run migrate docker-up docker-down clean
+.PHONY: help install dev test test-fast test-unit test-integration test-cov lint format run serve migrate-init migrate-create migrate-up migrate-down docker-up docker-down docker-logs clean
 
 PYTHON := $(shell [ -f .venv/bin/python ] && echo .venv/bin/python || echo python)
-PIP := $(shell [ -f .venv/bin/pip ] && echo .venv/bin/pip || echo pip)
+PIP    := $(shell [ -f .venv/bin/pip ]    && echo .venv/bin/pip    || echo pip)
+PYTEST := $(shell [ -f .venv/bin/pytest ] && echo .venv/bin/pytest  || echo pytest)
+TESTING ?= 1  ## Set to 0 to re-enable rate limiting during tests
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -14,17 +16,20 @@ dev: ## Install development dependencies
 	$(PIP) install -e ".[dev]"
 	pre-commit install
 
-test: ## Run all tests
-	pytest tests/ -v --tb=short
+test: ## Run all tests with coverage
+	TESTING=$(TESTING) $(PYTEST) tests/ -v --tb=short
 
-test-unit: ## Run unit tests only
-	pytest tests/ -v -m unit
+test-fast: ## Run all tests without coverage (faster)
+	TESTING=$(TESTING) $(PYTEST) tests/ -v --tb=short --no-cov
 
-test-integration: ## Run integration tests only
-	pytest tests/ -v -m integration
+test-unit: ## Run unit tests only (no-cov)
+	TESTING=$(TESTING) $(PYTEST) tests/ -v -m unit --no-cov
 
-test-cov: ## Run tests with coverage
-	pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+test-integration: ## Run integration tests only (no-cov)
+	TESTING=$(TESTING) $(PYTEST) tests/ -v -m integration --no-cov
+
+test-cov: ## Run tests with full HTML + terminal coverage report
+	TESTING=$(TESTING) $(PYTEST) tests/ --cov=src --cov-report=html --cov-report=term-missing
 
 lint: ## Run linter
 	ruff check src/ tests/
@@ -34,7 +39,9 @@ format: ## Format code
 	ruff format src/ tests/
 	ruff check --fix src/ tests/
 
-run: ## Run the application locally
+serve: run  ## Alias for run
+
+run: ## Run the application locally (with hot-reload)
 	$(PYTHON) -m uvicorn src.api.rest.app:app --host 0.0.0.0 --port 8000 --reload
 
 migrate-init: ## Initialize alembic

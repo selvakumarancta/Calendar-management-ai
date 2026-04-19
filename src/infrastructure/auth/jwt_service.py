@@ -4,6 +4,7 @@ JWT Service — infrastructure adapter for JSON Web Token operations.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -29,22 +30,28 @@ class JWTService:
 
     def create_access_token(self, user: User) -> str:
         """Create a short-lived access token."""
-        expire = datetime.now(timezone.utc) + self._access_expire
+        now = datetime.now(timezone.utc)
+        expire = now + self._access_expire
         payload = {
             "sub": str(user.id),
             "email": user.email,
             "plan": user.plan.value,
             "type": "access",
+            "jti": str(uuid.uuid4()),
+            "iat": now,
             "exp": expire,
         }
         return jwt.encode(payload, self._secret, algorithm=self._algorithm)
 
     def create_refresh_token(self, user: User) -> str:
         """Create a long-lived refresh token."""
-        expire = datetime.now(timezone.utc) + self._refresh_expire
+        now = datetime.now(timezone.utc)
+        expire = now + self._refresh_expire
         payload = {
             "sub": str(user.id),
             "type": "refresh",
+            "jti": str(uuid.uuid4()),
+            "iat": now,
             "exp": expire,
         }
         return jwt.encode(payload, self._secret, algorithm=self._algorithm)

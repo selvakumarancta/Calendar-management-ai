@@ -364,7 +364,9 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                 logger.warning(
                     "Failed to delete Google Calendar event %s: %s", event_id, e
                 )
-        local_deleted = await self._in_memory.delete_event(user_id, event_id, calendar_id)
+        local_deleted = await self._in_memory.delete_event(
+            user_id, event_id, calendar_id
+        )
         return google_deleted or local_deleted
 
     async def find_free_slots(

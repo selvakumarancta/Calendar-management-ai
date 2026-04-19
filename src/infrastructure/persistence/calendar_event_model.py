@@ -21,6 +21,8 @@ class CalendarEventModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    # Org that this event belongs to (NULL for personal events)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     provider_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     calendar_id: Mapped[str] = mapped_column(
         String(100), nullable=False, default="primary"

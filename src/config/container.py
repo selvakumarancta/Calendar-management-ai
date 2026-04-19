@@ -318,6 +318,37 @@ class Container:
             )
         return self._instances["message_hook_service"]
 
+    def whatsapp_webhook_adapter(self):  # type: ignore[no-untyped-def]
+        """Lazy-init WhatsApp webhook adapter."""
+        if "whatsapp_webhook_adapter" not in self._instances:
+            from src.infrastructure.whatsapp.webhook_adapter import (
+                WhatsAppWebhookAdapter,
+            )
+
+            self._instances["whatsapp_webhook_adapter"] = WhatsAppWebhookAdapter(
+                verify_token=self._settings.whatsapp_verify_token,
+                webhook_secret=self._settings.whatsapp_webhook_secret,
+            )
+        return self._instances["whatsapp_webhook_adapter"]
+
+    def whatsapp_intelligence_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init WhatsApp intelligence service."""
+        if "whatsapp_intelligence_service" not in self._instances:
+            from src.application.services.whatsapp_intelligence_service import (
+                WhatsAppIntelligenceService,
+            )
+
+            db = self.database()
+            self._instances["whatsapp_intelligence_service"] = WhatsAppIntelligenceService(
+                message_hook_service=self.message_hook_service(),
+                calendar_adapter=self.calendar_adapter(),
+                db_session_factory=db.session_factory,
+                whatsapp_adapter=self.whatsapp_webhook_adapter(),
+                access_token=self._settings.whatsapp_access_token,
+                phone_number_id=self._settings.whatsapp_phone_number_id,
+            )
+        return self._instances["whatsapp_intelligence_service"]
+
     def booking_page_service(self):  # type: ignore[no-untyped-def]
         """Lazy-init booking page service (Calendly / Cal.com slot reading)."""
         if "booking_page_service" not in self._instances:
@@ -343,6 +374,33 @@ class Container:
                 db_session_factory=db.session_factory,
             )
         return self._instances["invite_verification_service"]
+
+    def stripe_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init Stripe billing service."""
+        if "stripe_service" not in self._instances:
+            from src.billing.plans import PlanTier
+            from src.billing.stripe_service import StripeBillingService
+
+            self._instances["stripe_service"] = StripeBillingService(
+                secret_key=self._settings.stripe_secret_key,
+                webhook_secret=self._settings.stripe_webhook_secret,
+                price_ids={
+                    PlanTier.PRO: self._settings.stripe_price_pro,
+                    PlanTier.BUSINESS: self._settings.stripe_price_business,
+                },
+            )
+        return self._instances["stripe_service"]
+
+    def audit_log_service(self):  # type: ignore[no-untyped-def]
+        """Lazy-init audit log service."""
+        if "audit_log_service" not in self._instances:
+            from src.application.services.audit_log_service import AuditLogService
+
+            db = self.database()
+            self._instances["audit_log_service"] = AuditLogService(
+                db_session_factory=db.session_factory,
+            )
+        return self._instances["audit_log_service"]
 
     async def shutdown(self) -> None:
         """Clean up all resources."""

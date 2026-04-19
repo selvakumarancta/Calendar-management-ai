@@ -11,17 +11,24 @@ from src.api.rest.app import create_app
 
 
 @pytest.fixture()
-def app():
-    """Create a test app with container wired on app.state."""
+async def app():
+    """Create a test app with container wired on app.state and tables created."""
     from src.config.container import Container
     from src.config.settings import Settings
+    from src.infrastructure.security.token_encryption import set_encryption_key
 
     application = create_app()
-    # Wire container manually since ASGI lifespan doesn't run under httpx
     settings = Settings()
+    set_encryption_key(settings.app_secret_key)
+
     container = Container(settings)
+    # Create tables for the test run (lifespan is not triggered by ASGITransport)
+    db = container.database()
+    await db.create_tables()
+
     application.state.container = container
-    return application
+    yield application
+    await container.shutdown()
 
 
 class TestHealthEndpoints:

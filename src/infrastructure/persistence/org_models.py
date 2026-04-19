@@ -106,3 +106,36 @@ class ProviderConnectionModel(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class OrgLicenseConfigModel(Base):
+    """
+    Per-organization license configuration — one row per org.
+
+    Controls how many seats (user licenses) the org has purchased and the
+    cost-per-seat used by the billing layer to compute invoices.
+    """
+
+    __tablename__ = "org_license_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, nullable=False, unique=True, index=True
+    )
+    seat_cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_seats: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    billing_cycle: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="monthly"
+    )
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )

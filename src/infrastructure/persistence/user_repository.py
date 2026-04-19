@@ -55,6 +55,9 @@ class SQLAlchemyUserRepository(UserRepositoryPort):
             model.google_access_token = user.google_access_token
             model.google_refresh_token = user.google_refresh_token
             model.google_token_expiry = user.google_token_expiry
+            model.microsoft_access_token = user.microsoft_access_token
+            model.microsoft_refresh_token = user.microsoft_refresh_token
+            model.microsoft_token_expiry = user.microsoft_token_expiry
             model.stripe_customer_id = user.stripe_customer_id
             model.stripe_subscription_id = user.stripe_subscription_id
             model.updated_at = user.updated_at
@@ -86,6 +89,9 @@ class SQLAlchemyUserRepository(UserRepositoryPort):
             google_access_token=model.google_access_token,
             google_refresh_token=model.google_refresh_token,
             google_token_expiry=model.google_token_expiry,
+            microsoft_access_token=getattr(model, "microsoft_access_token", None),
+            microsoft_refresh_token=getattr(model, "microsoft_refresh_token", None),
+            microsoft_token_expiry=getattr(model, "microsoft_token_expiry", None),
             stripe_customer_id=model.stripe_customer_id,
             stripe_subscription_id=model.stripe_subscription_id,
             created_at=model.created_at,
@@ -104,6 +110,9 @@ class SQLAlchemyUserRepository(UserRepositoryPort):
             google_access_token=user.google_access_token,
             google_refresh_token=user.google_refresh_token,
             google_token_expiry=user.google_token_expiry,
+            microsoft_access_token=user.microsoft_access_token,
+            microsoft_refresh_token=user.microsoft_refresh_token,
+            microsoft_token_expiry=user.microsoft_token_expiry,
             stripe_customer_id=user.stripe_customer_id,
             stripe_subscription_id=user.stripe_subscription_id,
             created_at=user.created_at,

@@ -54,7 +54,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json(
                     {"type": "error", "content": "Authentication required"}
                 )
-                continue
+                await websocket.close(code=4001)
+                return
 
             # --- Process via ChatService ---
             await websocket.send_json({"type": "token", "content": "Thinking..."})

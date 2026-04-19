@@ -15,12 +15,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.api.middleware.correlation_id import CorrelationIdMiddleware
 from src.api.middleware.rate_limiter import RateLimiterMiddleware
 from src.api.rest.email_routes import email_router
 from src.api.rest.org_routes import google_callback_router, org_router
-from src.api.rest.routes import auth_router, calendar_router, chat_router, health_router
+from src.api.rest.whatsapp_routes import whatsapp_router
+from src.api.rest.routes import (
+    admin_router,
+    auth_router,
+    calendar_router,
+    chat_router,
+    health_router,
+)
 from src.api.rest.settings_routes import settings_router
 from src.config.container import Container
+from src.config.logging_config import configure_logging
 from src.config.settings import get_settings
 from src.domain.exceptions import (
     AgentError,
@@ -45,7 +54,42 @@ logger = logging.getLogger("calendar_agent")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan — create DI container on startup, teardown on shutdown."""
     settings = get_settings()
+
+    # Guard: refuse to start in production with insecure defaults
+    if settings.is_production:
+        if settings.app_secret_key in ("change-me", "", "secret", "dev"):
+            raise RuntimeError(
+                "APP_SECRET_KEY must be changed from the default value before running in production. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        if not settings.active_api_key:
+            raise RuntimeError(
+                f"LLM API key ({settings.llm_provider.upper()}_API_KEY) must be set in production."
+            )
+
     container = Container(settings)
+
+    # Initialize Sentry error tracking (no-op if DSN not configured or invalid)
+    if (
+        settings.sentry_dsn
+        and not settings.sentry_dsn.startswith("...")
+        and "ingest.sentry.io" in settings.sentry_dsn
+    ):
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.fastapi import FastApiIntegration
+            from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+            sentry_sdk.init(
+                dsn=settings.sentry_dsn,
+                environment=settings.app_env,
+                integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+                traces_sample_rate=0.1,
+                send_default_pii=False,
+            )
+            logger.info("Sentry error tracking initialized")
+        except Exception as sentry_err:
+            logger.warning("Sentry init failed (ignored): %s", sentry_err)
 
     # Initialize token encryption with the app secret key
     from src.infrastructure.security.token_encryption import set_encryption_key
@@ -77,8 +121,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Store on app.state so dependencies.get_container() can find it
     app.state.container = container
 
-    # Start background email scanner
-    from src.infrastructure.workers.email_scanner import EmailScannerWorker
+    # Start background email scanner (ARQ when Redis available, in-process fallback)
+    from src.infrastructure.workers.arq_email_scanner import EmailScannerWorker
 
     scanner = EmailScannerWorker(
         container,
@@ -152,6 +196,9 @@ def create_app() -> FastAPI:
     """FastAPI application factory."""
     settings = get_settings()
 
+    # Configure structured logging early so all startup messages are structured
+    configure_logging(app_env=settings.app_env, log_level=settings.app_log_level)
+
     app = FastAPI(
         title="Calendar Management Agent",
         description="AI-powered Calendar Management SaaS Platform",
@@ -170,8 +217,23 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Rate limiting
+    # Correlation ID — must be added before rate limiter so request_id propagates
+    app.add_middleware(CorrelationIdMiddleware)
+
+    # Rate limiting (uses Redis in prod, in-memory in dev)
     app.add_middleware(RateLimiterMiddleware)
+
+    # Prometheus metrics — exposes /metrics for Prometheus scraping.
+    # No-ops gracefully if the package is absent (e.g. stripped prod images).
+    try:
+        from prometheus_fastapi_instrumentator import Instrumentator
+
+        Instrumentator(
+            should_group_status_codes=False,
+            excluded_handlers=["/health", "/ready", "/nginx-health", "/metrics"],
+        ).instrument(app).expose(app, include_in_schema=False)
+    except ImportError:
+        pass
 
     # Exception handlers
     _register_exception_handlers(app)
@@ -189,6 +251,15 @@ def create_app() -> FastAPI:
     app.include_router(
         email_router, prefix="/api/v1/email", tags=["Email Intelligence"]
     )
+    app.include_router(
+        whatsapp_router, prefix="/api/v1/webhooks", tags=["WhatsApp"]
+    )
+    app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
+
+    # Billing routes
+    from src.api.rest.billing_routes import billing_router
+
+    app.include_router(billing_router, prefix="/api/v1/billing", tags=["Billing"])
 
     # WebSocket
     from src.api.websocket.chat_ws import ws_router

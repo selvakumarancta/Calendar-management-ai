@@ -90,7 +90,7 @@ asyncio_mode = "auto"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short --strict-markers"
+addopts = "-v --tb=short --strict-markers --cov=src --cov-report=term-missing:skip-covered --cov-fail-under=88"
 markers = [
     "unit: Unit tests (no external deps)",
     "integration: Integration tests (requires services)",

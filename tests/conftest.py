@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
+
+# Disable rate limiting for all tests — prevents 429 bleed between test runs.
+os.environ.setdefault("TESTING", "1")
+
+# Use a dedicated test database so integration tests never pollute the dev DB.
+os.environ.setdefault(
+    "DATABASE_URL", "sqlite+aiosqlite:///./data/test_calendar_agent.db"
+)
 
 import pytest
 

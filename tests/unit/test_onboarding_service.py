@@ -279,3 +279,274 @@ async def test_get_status_returns_not_started_when_no_record():
     svc = OnboardingService(db_session_factory=_fake_session_factory())
     status = await svc.get_onboarding_status(USER_ID)
     assert status == OnboardingStatus.NOT_STARTED.value
+
+
+# ---------------------------------------------------------------------------
+# Missing branch coverage tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_backfill_exception_is_captured_in_gather():
+    """When _backfill_calendar_events raises, asyncio.gather captures it (lines 105-106)."""
+    with patch.object(
+        OnboardingService,
+        "_backfill_calendar",
+        new=AsyncMock(side_effect=RuntimeError("backfill boom")),
+    ):
+        svc = OnboardingService(db_session_factory=_fake_session_factory())
+        result = await svc.run_onboarding(
+            user_id=USER_ID,
+            user_email=USER_EMAIL,
+            user_timezone="UTC",
+            email_provider=None,
+        )
+    assert any("Backfill" in e for e in result.get("errors", []))
+    assert result["status"] == "completed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_history_exception_is_captured_in_gather():
+    """When _gather_history raises, asyncio.gather captures it (lines 113-115)."""
+    with patch.object(
+        OnboardingService,
+        "_gather_history",
+        new=AsyncMock(side_effect=RuntimeError("history boom")),
+    ):
+        svc = OnboardingService(db_session_factory=_fake_session_factory())
+        result = await svc.run_onboarding(
+            user_id=USER_ID,
+            user_email=USER_EMAIL,
+            user_timezone="UTC",
+            email_provider=None,
+        )
+    assert any("History" in e for e in result.get("errors", []))
+    assert result["status"] == "completed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_outer_except_in_run_onboarding():
+    """When UserGuidesService.generate_all_guides raises, the outer except fires (lines 141-145)."""
+    with patch(
+        "src.application.services.user_guides_service.UserGuidesService"
+    ) as mock_cls:
+        mock_cls.return_value.generate_all_guides = AsyncMock(
+            side_effect=RuntimeError("guides failed")
+        )
+        svc = OnboardingService(db_session_factory=_fake_session_factory())
+        result = await svc.run_onboarding(
+            user_id=USER_ID,
+            user_email=USER_EMAIL,
+            user_timezone="UTC",
+            email_provider=None,
+        )
+    assert result["status"] == "failed"
+    assert len(result["errors"]) > 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_backfill_skips_event_already_on_calendar():
+    """When calendar.list_events returns results, the duplicate event is skipped (line 259)."""
+    calendar = AsyncMock()
+    # First check returns a conflicting event → skip; no more emails
+    calendar.list_events = AsyncMock(return_value=["existing"])
+    calendar.create_event = AsyncMock()
+
+    email_provider = AsyncMock()
+    email_provider.list_recent_emails = AsyncMock(return_value=[_fake_email_obj()])
+
+    backfill_json = '{"summary": "Team sync", "start_iso": "2026-03-15T14:00:00+00:00", "end_iso": "2026-03-15T15:00:00+00:00"}'
+    llm = AsyncMock()
+    llm.chat_completion = AsyncMock(side_effect=[backfill_json, "", ""])
+
+    svc = OnboardingService(
+        llm_adapter=llm,
+        calendar_adapter=calendar,
+        db_session_factory=_fake_session_factory(),
+    )
+    result = await svc.run_onboarding(
+        user_id=USER_ID,
+        user_email=USER_EMAIL,
+        user_timezone="UTC",
+        email_provider=email_provider,
+    )
+    # Event was found as existing → create_event NOT called
+    calendar.create_event.assert_not_called()
+    assert result["calendar_events_backfilled"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_backfill_inner_exception_per_email():
+    """When create_event raises inside the backfill loop, it's caught per-email (lines 279-280)."""
+    calendar = AsyncMock()
+    calendar.list_events = AsyncMock(return_value=[])
+    calendar.create_event = AsyncMock(side_effect=RuntimeError("create failed"))
+
+    email_provider = AsyncMock()
+    email_provider.list_recent_emails = AsyncMock(return_value=[_fake_email_obj()])
+
+    backfill_json = '{"summary": "Team sync", "start_iso": "2026-03-15T14:00:00+00:00", "end_iso": "2026-03-15T15:00:00+00:00"}'
+    llm = AsyncMock()
+    llm.chat_completion = AsyncMock(side_effect=[backfill_json, "", ""])
+
+    svc = OnboardingService(
+        llm_adapter=llm,
+        calendar_adapter=calendar,
+        db_session_factory=_fake_session_factory(),
+    )
+    result = await svc.run_onboarding(
+        user_id=USER_ID,
+        user_email=USER_EMAIL,
+        user_timezone="UTC",
+        email_provider=email_provider,
+    )
+    # Error is swallowed per-email; onboarding still completes
+    assert result["status"] == "completed"
+    assert result["calendar_events_backfilled"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_backfill_outer_exception():
+    """When list_recent_emails raises, the outer backfill exception is caught (lines 282-283)."""
+    calendar = AsyncMock()
+    calendar.list_events = AsyncMock(return_value=[])
+
+    email_provider = AsyncMock()
+    email_provider.list_recent_emails = AsyncMock(
+        side_effect=RuntimeError("provider down")
+    )
+
+    llm = AsyncMock()
+    llm.chat_completion = AsyncMock(side_effect=["", ""])  # guides
+
+    svc = OnboardingService(
+        llm_adapter=llm,
+        calendar_adapter=calendar,
+        db_session_factory=_fake_session_factory(),
+    )
+    result = await svc.run_onboarding(
+        user_id=USER_ID,
+        user_email=USER_EMAIL,
+        user_timezone="UTC",
+        email_provider=email_provider,
+    )
+    assert result["status"] == "completed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_extract_confirmed_event_returns_none_without_llm():
+    """_extract_confirmed_event returns None when no LLM adapter is set (line 293)."""
+    # Call the private method directly — it short-circuits at line 293 when no LLM
+    svc = OnboardingService(llm_adapter=None)
+    result = await svc._extract_confirmed_event(_fake_email_obj(), "UTC")
+    assert result is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_extract_confirmed_event_llm_json_error():
+    """Exception in _extract_confirmed_event LLM call is caught (lines 323-324)."""
+    email_provider = AsyncMock()
+    email_provider.list_recent_emails = AsyncMock(return_value=[_fake_email_obj()])
+
+    calendar = AsyncMock()
+    calendar.list_events = AsyncMock(return_value=[])
+
+    llm = AsyncMock()
+    # First call (in _extract_confirmed_event) raises → caught at lines 323-324
+    llm.chat_completion = AsyncMock(side_effect=[RuntimeError("LLM error"), "", ""])
+
+    svc = OnboardingService(
+        llm_adapter=llm,
+        calendar_adapter=calendar,
+        db_session_factory=_fake_session_factory(),
+    )
+    result = await svc.run_onboarding(
+        user_id=USER_ID,
+        user_email=USER_EMAIL,
+        user_timezone="UTC",
+        email_provider=email_provider,
+    )
+    assert result["calendar_events_backfilled"] == 0
+    assert result["status"] == "completed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_status_db_exception_returns_not_started():
+    """DB exception in get_onboarding_status returns NOT_STARTED (lines 345-346)."""
+
+    def broken_factory():
+        class Broken:
+            async def __aenter__(self):
+                raise RuntimeError("DB exploded")
+
+            async def __aexit__(self, *_):
+                pass
+
+        return Broken()
+
+    svc = OnboardingService(db_session_factory=broken_factory)
+    status = await svc.get_onboarding_status(USER_ID)
+    assert status == OnboardingStatus.NOT_STARTED.value
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_status_updates_existing_record():
+    """_save_onboarding_status updates an existing record's status (lines 370-371)."""
+    existing_record = MagicMock()
+    existing_record.status = "not_started"
+    existing_record.updated_at = None
+
+    def factory():
+        class Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def execute(self, *_):
+                r = MagicMock()
+                r.scalars.return_value.first.return_value = existing_record
+                return r
+
+            def add(self, *_):
+                pass
+
+            async def commit(self):
+                pass
+
+        return Session()
+
+    svc = OnboardingService(db_session_factory=factory)
+    await svc._save_onboarding_status(USER_ID, OnboardingStatus.COMPLETED)
+    assert existing_record.status == OnboardingStatus.COMPLETED.value
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_status_db_exception_is_caught():
+    """DB exception in _save_onboarding_status is swallowed (lines 382-383)."""
+
+    def broken_factory():
+        class Broken:
+            async def __aenter__(self):
+                raise RuntimeError("DB down")
+
+            async def __aexit__(self, *_):
+                pass
+
+        return Broken()
+
+    svc = OnboardingService(db_session_factory=broken_factory)
+    # Must not raise
+    await svc._save_onboarding_status(USER_ID, OnboardingStatus.COMPLETED)

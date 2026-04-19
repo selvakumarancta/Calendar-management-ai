@@ -54,7 +54,9 @@ class GmailEmailAdapter(EmailProviderPort):
         refresh_token = decrypt_token(tokens.get("refresh_token", ""))
 
         if not access_token:
-            raise RuntimeError(f"Could not decrypt Gmail access token for user {user_id}")
+            raise RuntimeError(
+                f"Could not decrypt Gmail access token for user {user_id}"
+            )
 
         credentials = Credentials(
             token=access_token,
@@ -64,21 +66,51 @@ class GmailEmailAdapter(EmailProviderPort):
             client_secret=self._client_secret,
         )
 
-        # Always refresh when a refresh_token is available — we don't store token
-        # expiry so credentials.valid / credentials.expired are unreliable.
+        # Only refresh when token is expiring soon (< 5 min) or already expired.
+        # If expiry is unknown (None), refresh proactively to be safe.
+        # This prevents unnecessary round-trips to Google's token endpoint on
+        # every email scan (parity with OutlookEmailAdapter).
+        should_refresh = False
         if refresh_token and self._client_id:
+            token_expiry = tokens.get("token_expiry") if tokens else None
+            if token_expiry is None:
+                should_refresh = True  # unknown — refresh defensively
+            else:
+                from datetime import datetime, timezone
+
+                try:
+                    if isinstance(token_expiry, str):
+                        token_expiry = datetime.fromisoformat(token_expiry)
+                    if isinstance(token_expiry, datetime):
+                        tz = timezone.utc
+                        exp = (
+                            token_expiry.replace(tzinfo=tz)
+                            if token_expiry.tzinfo is None
+                            else token_expiry
+                        )
+                        remaining = (exp - datetime.now(tz)).total_seconds()
+                        should_refresh = remaining < 300  # refresh if < 5 min left
+                    else:
+                        should_refresh = True
+                except Exception:
+                    should_refresh = True
+
+        if should_refresh:
             try:
                 import asyncio
 
                 await asyncio.get_event_loop().run_in_executor(
                     None, lambda: credentials.refresh(Request())
                 )
-                # Persist refreshed tokens back to DB
+                # Persist refreshed tokens + new expiry back to DB
                 if credentials.token and self._db_session_factory:
                     new_enc_access = encrypt_token(credentials.token)
                     new_enc_refresh = encrypt_token(credentials.refresh_token or "")
                     await self._save_refreshed_tokens(
-                        user_id, new_enc_access, new_enc_refresh
+                        user_id,
+                        new_enc_access,
+                        new_enc_refresh,
+                        expiry=credentials.expiry,
                     )
             except RefreshError as e:
                 logger.warning(
@@ -94,8 +126,9 @@ class GmailEmailAdapter(EmailProviderPort):
         user_id: uuid.UUID,
         enc_access: str,
         enc_refresh: str,
+        expiry: object = None,
     ) -> None:
-        """Persist refreshed Google tokens back to provider_connections and users table."""
+        """Persist refreshed Google tokens + expiry back to provider_connections and users table."""
         from sqlalchemy import select
 
         from src.infrastructure.persistence.models import UserModel
@@ -116,6 +149,8 @@ class GmailEmailAdapter(EmailProviderPort):
                     conn.access_token = enc_access
                     if enc_refresh:
                         conn.refresh_token = enc_refresh
+                    if expiry is not None and hasattr(conn, "token_expiry"):
+                        conn.token_expiry = expiry
 
                 # Also update users table
                 r2 = await session.execute(
@@ -126,6 +161,8 @@ class GmailEmailAdapter(EmailProviderPort):
                     user.google_access_token = enc_access
                     if enc_refresh:
                         user.google_refresh_token = enc_refresh
+                    if expiry is not None and hasattr(user, "google_token_expiry"):
+                        user.google_token_expiry = expiry
 
                 await session.commit()
                 logger.info("Persisted refreshed Gmail tokens for user %s", user_id)
@@ -159,6 +196,7 @@ class GmailEmailAdapter(EmailProviderPort):
                     "access_token": conn.access_token,
                     "refresh_token": conn.refresh_token or "",
                     "provider_email": conn.provider_email or "",
+                    "token_expiry": getattr(conn, "token_expiry", None),
                 }
 
             # 2. Fall back to users table (main Google login stores tokens here)
@@ -177,6 +215,7 @@ class GmailEmailAdapter(EmailProviderPort):
                     "access_token": user.google_access_token,
                     "refresh_token": user.google_refresh_token or "",
                     "provider_email": user.email or "",
+                    "token_expiry": getattr(user, "google_token_expiry", None),
                 }
 
         return None
@@ -203,15 +242,15 @@ class GmailEmailAdapter(EmailProviderPort):
                 search_parts.append(
                     "("
                     "meeting OR schedule OR appointment OR invite OR invitation OR "
-                    "calendar OR standup OR \"stand-up\" OR sync OR interview OR "
+                    'calendar OR standup OR "stand-up" OR sync OR interview OR '
                     "deadline OR agenda OR conference OR webinar OR demo OR rsvp OR "
-                    "reschedule OR \"follow up\" OR followup OR reminder OR "
-                    "\"action required\" OR \"please attend\" OR "
-                    "\"let's meet\" OR \"let us meet\" OR \"can we meet\" OR "
-                    "\"are you free\" OR \"are you available\" OR \"hop on\" OR "
-                    "\"catch up\" OR \"catch-up\" OR \"quick call\" OR \"quick chat\" OR "
-                    "\"set up a call\" OR \"set up a meeting\" OR \"book a time\" OR "
-                    "\"pick a time\" OR \"find a time\" OR \"block some time\""
+                    'reschedule OR "follow up" OR followup OR reminder OR '
+                    '"action required" OR "please attend" OR '
+                    '"let\'s meet" OR "let us meet" OR "can we meet" OR '
+                    '"are you free" OR "are you available" OR "hop on" OR '
+                    '"catch up" OR "catch-up" OR "quick call" OR "quick chat" OR '
+                    '"set up a call" OR "set up a meeting" OR "book a time" OR '
+                    '"pick a time" OR "find a time" OR "block some time"'
                     ")"
                     " OR from:calendar-notification@google.com"
                     " OR from:noreply@google.com"
@@ -219,10 +258,10 @@ class GmailEmailAdapter(EmailProviderPort):
                     " -label:social"
                     " -category:promotions"
                     " -category:social"
-                    " -subject:(receipt OR invoice OR payment OR \"bank statement\" OR "
-                    "\"account statement\" OR OTP OR shipping OR delivery OR "
-                    "\"password reset\" OR newsletter OR unsubscribe OR "
-                    "\"special offer\" OR discount)"
+                    ' -subject:(receipt OR invoice OR payment OR "bank statement" OR '
+                    '"account statement" OR OTP OR shipping OR delivery OR '
+                    '"password reset" OR newsletter OR unsubscribe OR '
+                    '"special offer" OR discount)'
                 )
 
             search_query = " ".join(search_parts)

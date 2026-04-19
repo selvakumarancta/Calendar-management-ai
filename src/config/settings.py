@@ -92,6 +92,24 @@ class Settings(BaseSettings):
     stripe_price_pro: str = ""
     stripe_price_business: str = ""
 
+    # --- Email Notifications (SMTP / transactional) ---
+    smtp_host: str = ""  # e.g. smtp.sendgrid.net / smtp.resend.com / smtp.gmail.com
+    smtp_port: int = 587
+    smtp_username: str = ""  # SendGrid: "apikey", Resend: "resend"
+    smtp_password: str = ""  # API key or password
+    smtp_use_tls: bool = True
+    smtp_from_email: str = "noreply@calendar-agent.local"
+    smtp_from_name: str = "Calendar Agent"
+    # Optional outbound webhook called when an org invite is accepted.
+    # POST with JSON: {event, org_id, user_id, role}.  Empty = disabled.
+    invite_accept_webhook_url: str = ""
+
+    # --- WhatsApp (Meta Cloud API) ---
+    whatsapp_verify_token: str = "calendar-agent-whatsapp"  # any secret string for webhook verification
+    whatsapp_access_token: str = ""   # Meta permanent access token
+    whatsapp_phone_number_id: str = ""  # Meta phone number ID
+    whatsapp_webhook_secret: str = ""   # optional HMAC secret for payload verification
+
     # --- Monitoring ---
     langsmith_api_key: str = ""
     langsmith_project: str = "calendar-agent"

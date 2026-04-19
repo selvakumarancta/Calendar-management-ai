@@ -114,6 +114,19 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
+    # Check token blocklist (logout / password-change invalidation)
+    jti = payload.get("jti")
+    if jti:
+        from src.infrastructure.security.token_blocklist import get_token_blocklist
+
+        blocklist = get_token_blocklist()
+        if await blocklist.is_revoked(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     user_id_str = payload.get("sub")
     if not user_id_str:
         raise HTTPException(

@@ -4,6 +4,7 @@ Email Intelligence API Routes — scan emails, view suggestions, approve/reject.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from uuid import UUID
 
@@ -17,6 +18,17 @@ from src.domain.entities.user import User
 
 email_router = APIRouter()
 
+# Strong-reference set keeps fire-and-forget tasks alive until completion.
+# Without this, CPython's GC may destroy the task before it finishes.
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _fire(coro) -> None:  # type: ignore[no-untyped-def]
+    """Schedule a coroutine as a background task, keeping a strong reference."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
 
 # ---------------------------------------------------------------------------
 # DTOs
@@ -26,7 +38,10 @@ email_router = APIRouter()
 class ScanRequest(BaseModel):
     provider: str = Field(default="google", description="google or microsoft")
     since_hours: int = Field(
-        default=168, ge=1, le=720, description="How many hours back to scan (default 7 days)"
+        default=168,
+        ge=1,
+        le=720,
+        description="How many hours back to scan (default 7 days)",
     )
     max_emails: int = Field(default=100, ge=1, le=200)
     rescan: bool = Field(
@@ -541,7 +556,7 @@ async def start_onboarding(
 
     # Run in background — return immediately with status
     user_tz = getattr(current_user, "timezone", "UTC") or "UTC"
-    asyncio.create_task(
+    _fire(
         service.run_onboarding(
             user_id=current_user.id,
             user_email=getattr(current_user, "email", ""),
@@ -701,9 +716,7 @@ async def gmail_webhook(
         user_id = conn.user_id
 
         # Trigger a scan just for this user (scan last 24h to catch what changed)
-        import asyncio
-
-        asyncio.create_task(_trigger_scan_for_user(user_id, container))
+        _fire(_trigger_scan_for_user(user_id, container))
 
     except Exception as e:
         return {"status": "error", "reason": str(e)}
@@ -831,6 +844,70 @@ async def create_availability_link(
         subject=request.subject,
     )
     return {"url": url, "mode": "availability"}
+
+
+@email_router.get("/scheduling-links")
+async def list_scheduling_links(
+    active_only: bool = True,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> list[dict]:
+    """List all scheduling links belonging to the current user."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.email_models import SchedulingLinkModel
+
+    db = container.database()
+    async with db.session_factory() as session:
+        query = select(SchedulingLinkModel).where(
+            SchedulingLinkModel.user_id == current_user.id
+        )
+        if active_only:
+            query = query.where(SchedulingLinkModel.is_used == False)  # noqa: E712
+        query = query.order_by(SchedulingLinkModel.created_at.desc())
+
+        result = await session.execute(query)
+        rows = result.scalars().all()
+
+    return [
+        {
+            "link_id": r.link_id,
+            "mode": r.mode,
+            "is_used": r.is_used,
+            "attendee_email": getattr(r, "attendee_email", None),
+            "duration_minutes": getattr(r, "duration_minutes", None),
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "url": f"{container.settings.app_base_url}/schedule/{r.link_id}",
+        }
+        for r in rows
+    ]
+
+
+@email_router.delete("/scheduling-links/{link_id}", status_code=204)
+async def delete_scheduling_link(
+    link_id: str,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> None:
+    """Deactivate (mark used) a scheduling link so it can no longer be booked."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.email_models import SchedulingLinkModel
+
+    db = container.database()
+    async with db.session_factory() as session:
+        result = await session.execute(
+            select(SchedulingLinkModel).where(
+                SchedulingLinkModel.link_id == link_id,
+                SchedulingLinkModel.user_id == current_user.id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Scheduling link not found")
+        row.is_used = True
+        await session.commit()
 
 
 @email_router.get("/scheduling-links/{link_id}")

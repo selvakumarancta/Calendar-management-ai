@@ -28,18 +28,160 @@ class OutlookEmailAdapter(EmailProviderPort):
         self._db_session_factory = factory
 
     async def _get_headers(self, user_id: uuid.UUID) -> dict[str, str]:
-        """Get authorization headers for a user's Microsoft account."""
-        from src.infrastructure.security.token_encryption import decrypt_token
+        """Get authorization headers, refreshing the access token when it is near expiry."""
+        access_token = await self._get_fresh_access_token(user_id)
+        return {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+    async def _get_fresh_access_token(self, user_id: uuid.UUID) -> str:
+        """
+        Decrypt the stored MS access token and refresh it automatically when it
+        expires within 5 minutes.  Refreshed tokens are persisted back to the DB.
+        """
+        from src.infrastructure.security.token_encryption import (
+            decrypt_token,
+            encrypt_token,
+        )
 
         tokens = await self._get_user_tokens(user_id)
         if not tokens:
             raise RuntimeError(f"No Outlook tokens found for user {user_id}")
 
         access_token = decrypt_token(tokens["access_token"])
+        if not access_token:
+            raise RuntimeError(
+                f"Could not decrypt Microsoft access token for user {user_id}"
+            )
+
+        expiry: datetime | None = tokens.get("expiry")
+        enc_refresh: str = tokens.get("refresh_token", "")
+
+        if expiry and enc_refresh:
+            now = datetime.now(timezone.utc)
+            expiry_aware = (
+                expiry.replace(tzinfo=timezone.utc)
+                if expiry.tzinfo is None
+                else expiry
+            )
+            if (expiry_aware - now).total_seconds() < 300:  # within 5 min
+                try:
+                    refresh_token = decrypt_token(enc_refresh)
+                    new_data = await self._ms_refresh(refresh_token)
+                    access_token = new_data["access_token"]
+                    await self._persist_refreshed_tokens(
+                        user_id=user_id,
+                        source=tokens.get("source", "provider"),
+                        source_id=tokens.get("source_id", ""),
+                        access_token=access_token,
+                        refresh_token=new_data.get("refresh_token", refresh_token),
+                        expires_in=int(new_data.get("expires_in", 3600)),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "MS token refresh failed for user %s: %s — using existing token",
+                        user_id,
+                        exc,
+                    )
+
+        return access_token
+
+    async def _ms_refresh(self, refresh_token: str) -> dict:
+        """Call the Microsoft token endpoint to exchange a refresh token."""
+        import os
+
+        import httpx
+
+        client_id = os.environ.get("MICROSOFT_CLIENT_ID", "")
+        client_secret = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+        tenant_id = os.environ.get("MICROSOFT_TENANT_ID", "common")
+
+        if not client_id or not refresh_token:
+            raise RuntimeError("Cannot refresh MS token: missing client_id or refresh_token")
+
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                token_url,
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                    "scope": "openid profile email offline_access Calendars.ReadWrite Mail.Read",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
         return {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token", refresh_token),
+            "expires_in": data.get("expires_in", 3600),
         }
+
+    async def _persist_refreshed_tokens(
+        self,
+        user_id: uuid.UUID,
+        source: str,
+        source_id: str,
+        access_token: str,
+        refresh_token: str,
+        expires_in: int,
+    ) -> None:
+        """Write a refreshed token pair back to whichever table issued the original."""
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from src.infrastructure.security.token_encryption import encrypt_token
+
+        if not self._db_session_factory:
+            return
+
+        enc_access = encrypt_token(access_token)
+        enc_refresh = encrypt_token(refresh_token)
+        new_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+        async with self._db_session_factory() as session:
+            if source == "provider":
+                from src.infrastructure.persistence.org_models import (
+                    ProviderConnectionModel,
+                )
+
+                try:
+                    import uuid as _uuid_mod
+
+                    conn_uuid = _uuid_mod.UUID(source_id)
+                except (ValueError, AttributeError):
+                    return
+
+                result = await session.execute(
+                    select(ProviderConnectionModel).where(
+                        ProviderConnectionModel.id == conn_uuid
+                    )
+                )
+                conn = result.scalar_one_or_none()
+                if conn:
+                    conn.access_token = enc_access
+                    conn.refresh_token = enc_refresh
+                    conn.token_expiry = new_expiry
+                    await session.commit()
+            else:  # source == "user"
+                from src.infrastructure.persistence.models import UserModel
+
+                result = await session.execute(
+                    select(UserModel).where(UserModel.id == user_id)
+                )
+                model = result.scalar_one_or_none()
+                if model:
+                    model.microsoft_access_token = enc_access
+                    model.microsoft_refresh_token = enc_refresh
+                    model.microsoft_token_expiry = new_expiry
+                    await session.commit()
+
+        logger.info("MS tokens refreshed and persisted for user %s", user_id)
 
     async def _get_user_tokens(self, user_id: uuid.UUID) -> dict | None:
         """Look up Microsoft OAuth tokens — checks provider_connections first, then users table."""
@@ -65,9 +207,12 @@ class OutlookEmailAdapter(EmailProviderPort):
                 return {
                     "access_token": conn.access_token,
                     "refresh_token": conn.refresh_token or "",
+                    "expiry": conn.token_expiry,
+                    "source": "provider",
+                    "source_id": str(conn.id),
                 }
 
-            # 2. Fall back to users table (Microsoft login stores tokens in google_access_token field)
+            # 2. Fall back to users table — microsoft_* columns set during MS OAuth login
             from src.infrastructure.persistence.models import UserModel
 
             result2 = await session.execute(
@@ -76,12 +221,15 @@ class OutlookEmailAdapter(EmailProviderPort):
             user = result2.scalars().first()
             if (
                 user
-                and user.google_access_token
-                and user.google_access_token not in ("dev-token", "")
+                and user.microsoft_access_token
+                and user.microsoft_access_token not in ("dev-token", "")
             ):
                 return {
-                    "access_token": user.google_access_token,
-                    "refresh_token": user.google_refresh_token or "",
+                    "access_token": user.microsoft_access_token,
+                    "refresh_token": user.microsoft_refresh_token or "",
+                    "expiry": user.microsoft_token_expiry,
+                    "source": "user",
+                    "source_id": str(user.id),
                 }
 
         return None

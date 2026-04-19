@@ -158,3 +158,156 @@ class TestEmailClassifierLLMPath:
         result = await service.classify(email)
         assert result is not None
         assert isinstance(result.needs_draft, bool)
+
+    @pytest.mark.asyncio
+    async def test_calendar_notification_pattern_non_actionable(self):
+        """Emails matching calendar notification patterns are pre-filtered."""
+        service = EmailClassifierService(llm_adapter=None)
+        email = _email(
+            subject="has invited you to the following event",
+            body="You have a new calendar invite",
+        )
+        result = await service.classify(email)
+        assert result.needs_draft is False
+
+    @pytest.mark.asyncio
+    async def test_calendar_accepted_pattern_non_actionable(self):
+        """Accepted/Declined prefixed subjects are pre-filtered."""
+        service = EmailClassifierService(llm_adapter=None)
+        email = _email(
+            subject="Accepted: Weekly Sync",
+            body="John has accepted the invite",
+        )
+        result = await service.classify(email)
+        assert result.needs_draft is False
+
+    @pytest.mark.asyncio
+    async def test_llm_exception_falls_back_to_heuristic(self):
+        """If LLM raises, classifier falls back to rule-based."""
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = RuntimeError("API timeout")
+        service = EmailClassifierService(llm_adapter=mock_llm)
+        email = _email(subject="Let us meet", body="Can we schedule a call this week?")
+        result = await service.classify(email)
+        assert result is not None
+        assert isinstance(result.needs_draft, bool)
+
+
+# ---------------------------------------------------------------------------
+# Tests — missing branch coverage
+# ---------------------------------------------------------------------------
+
+import json
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_calendar_notification_body_pattern_non_actionable():
+    """Body matching a calendar notification pattern returns non-actionable (line 137)."""
+    service = EmailClassifierService(llm_adapter=None)
+    email = _email(
+        subject="Meeting update",
+        body="You have a new invitation: Team Sync",
+        sender="calendar-notification@google.com",
+    )
+    result = await service.classify(email)
+    assert result.needs_draft is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_with_thread_history_builds_section():
+    """Thread messages produce a thread history section in the prompt (lines 204-210)."""
+    from src.domain.entities.email_message import ThreadMessage
+
+    prior = ThreadMessage(
+        sender="bob@example.com",
+        body="Sounds good, see you then",
+        is_from_user=False,
+        date="2026-04-01",
+    )
+
+    llm_response = json.dumps(
+        {
+            "category": "meeting_request",
+            "needs_draft": True,
+            "confidence": 0.9,
+            "reasoning": "thread",
+            "duration_minutes": 30,
+            "attendees": [],
+            "subject_line": "Re: Sync",
+            "key_dates": [],
+        }
+    )
+    mock_llm = AsyncMock()
+    mock_llm.chat_completion = AsyncMock(return_value=llm_response)
+    service = EmailClassifierService(llm_adapter=mock_llm)
+    email = _email(subject="Re: Sync", body="Can we confirm Friday?")
+    result = await service.classify(email, thread_messages=[prior])
+    assert result.needs_draft is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_backtick_response_is_parsed():
+    """Backtick-wrapped LLM response is stripped before JSON parse (line 235)."""
+    payload = json.dumps(
+        {
+            "category": "meeting_request",
+            "needs_draft": True,
+            "confidence": 0.88,
+            "reasoning": "ok",
+            "duration_minutes": None,
+            "attendees": [],
+            "subject_line": "Interview",
+            "key_dates": [],
+        }
+    )
+    wrapped = "```json\n" + payload + "\n```"
+    mock_llm = AsyncMock()
+    mock_llm.chat_completion = AsyncMock(return_value=wrapped)
+    service = EmailClassifierService(llm_adapter=mock_llm)
+    email = _email(subject="Interview", body="Are you free Thursday?")
+    result = await service.classify(email)
+    assert result.needs_draft is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_invalid_category_and_duration_fall_back():
+    """Unknown category string and non-numeric duration are handled (lines 249-250)."""
+    payload = json.dumps(
+        {
+            "category": "wibble_wobble",
+            "needs_draft": True,
+            "confidence": 0.7,
+            "reasoning": "ok",
+            "duration_minutes": "lots",
+            "attendees": [],
+            "subject_line": "Test",
+            "key_dates": [],
+        }
+    )
+    mock_llm = AsyncMock()
+    mock_llm.chat_completion = AsyncMock(return_value=payload)
+    service = EmailClassifierService(llm_adapter=mock_llm)
+    email = _email(subject="Test", body="Let's meet")
+    result = await service.classify(email)
+    # Unknown category falls back to non_actionable; no crash
+    assert result is not None
+    assert result.duration_minutes is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_heuristic_cancellation_pattern():
+    """Rule-based path recognises meeting cancellation keyword (line 283)."""
+    service = EmailClassifierService(llm_adapter=None)
+    email = _email(
+        subject="Meeting cancelled",
+        body="Just letting you know, the sync has been cancelled",
+    )
+    result = await service.classify(email)
+    from src.domain.entities.email_message import EmailCategory
+
+    assert result.category == EmailCategory.MEETING_CANCELLATION

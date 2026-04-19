@@ -476,6 +476,7 @@ def _hot_reload_settings(
 class UserPreferencesResponse(BaseModel):
     autopilot_enabled: bool
     email_draft_enabled: bool
+    branding_enabled: bool
     scheduling_calendar_id: str | None
     onboarding_completed: bool
     scheduling_guide_generated: bool
@@ -485,6 +486,7 @@ class UserPreferencesResponse(BaseModel):
 class UserPreferencesUpdateRequest(BaseModel):
     autopilot_enabled: bool | None = None
     email_draft_enabled: bool | None = None
+    branding_enabled: bool | None = None
 
 
 @settings_router.get("/user-preferences", response_model=UserPreferencesResponse)
@@ -508,6 +510,7 @@ async def get_user_preferences(
         return {
             "autopilot_enabled": False,
             "email_draft_enabled": True,
+            "branding_enabled": True,
             "scheduling_calendar_id": None,
             "onboarding_completed": False,
             "scheduling_guide_generated": False,
@@ -517,6 +520,7 @@ async def get_user_preferences(
     return {
         "autopilot_enabled": getattr(user_row, "autopilot_enabled", False),
         "email_draft_enabled": getattr(user_row, "email_draft_enabled", True),
+        "branding_enabled": getattr(user_row, "branding_enabled", True),
         "scheduling_calendar_id": getattr(user_row, "scheduling_calendar_id", None),
         "onboarding_completed": getattr(user_row, "onboarding_completed", False),
         "scheduling_guide_generated": getattr(
@@ -558,17 +562,32 @@ async def update_user_preferences(
             user_row.autopilot_enabled = request.autopilot_enabled
         if request.email_draft_enabled is not None:
             user_row.email_draft_enabled = request.email_draft_enabled
+        if request.branding_enabled is not None and hasattr(
+            user_row, "branding_enabled"
+        ):
+            user_row.branding_enabled = request.branding_enabled
 
         await session.commit()
 
     return {
         "autopilot_enabled": user_row.autopilot_enabled,
         "email_draft_enabled": user_row.email_draft_enabled,
+        "branding_enabled": getattr(user_row, "branding_enabled", True),
         "scheduling_calendar_id": user_row.scheduling_calendar_id,
         "onboarding_completed": user_row.onboarding_completed,
         "scheduling_guide_generated": user_row.scheduling_guide_generated,
         "style_guide_generated": user_row.style_guide_generated,
     }
+
+
+@settings_router.patch("/user-preferences", response_model=UserPreferencesResponse)
+async def patch_user_preferences(
+    request: UserPreferencesUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """PATCH alias for PUT /user-preferences — partial update."""
+    return await update_user_preferences(request, current_user, container)
 
 
 @settings_router.post("/user-preferences/setup-calendar")

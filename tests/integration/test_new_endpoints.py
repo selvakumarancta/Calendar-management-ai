@@ -31,16 +31,27 @@ from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture()
-def app():
+async def app():
+    import asyncio
+
     from src.api.rest.app import create_app
     from src.config.container import Container
     from src.config.settings import Settings
+    from src.infrastructure.security.token_encryption import set_encryption_key
 
     application = create_app()
     settings = Settings()
+    set_encryption_key(settings.app_secret_key)
+
     container = Container(settings)
+    # Ensure tables exist for the test run (lifespan is not triggered by ASGITransport)
+    db = container.database()
+    await db.create_tables()
+
     application.state.container = container
-    return application
+    yield application
+    # Cleanup
+    await container.shutdown()
 
 
 @pytest.fixture()

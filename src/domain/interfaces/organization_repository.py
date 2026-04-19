@@ -9,6 +9,7 @@ from uuid import UUID
 
 from src.domain.entities.organization import (
     Organization,
+    OrgLicenseConfig,
     OrgMembership,
     ProviderConnection,
 )
@@ -89,3 +90,13 @@ class ProviderConnectionRepositoryPort(abc.ABC):
 
     @abc.abstractmethod
     async def delete(self, conn_id: UUID) -> bool: ...
+
+
+class OrgLicenseConfigRepositoryPort(abc.ABC):
+    """Abstract repository for per-organization license configuration."""
+
+    @abc.abstractmethod
+    async def get_by_org(self, org_id: UUID) -> OrgLicenseConfig | None: ...
+
+    @abc.abstractmethod
+    async def upsert(self, config: OrgLicenseConfig) -> OrgLicenseConfig: ...

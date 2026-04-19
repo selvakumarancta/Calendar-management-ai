@@ -1,6 +1,13 @@
 """
-Background Email Scanner — periodically scans all users' inboxes.
-Runs as an asyncio background task within the FastAPI lifespan.
+Background Email Scanner — DEPRECATED.
+
+This module is SUPERSEDED by ``src.infrastructure.workers.arq_email_scanner``
+which provides the same functionality with ARQ (Redis-backed) for durable job
+execution across multiple app replicas, and falls back to in-process asyncio
+automatically in dev mode.
+
+This file is retained for reference only and is NOT imported anywhere in the
+application.  It will be removed in a future cleanup.
 """
 
 from __future__ import annotations

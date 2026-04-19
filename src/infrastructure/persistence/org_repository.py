@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domain.entities.organization import (
     ConnectionStatus,
     Organization,
+    OrgLicenseConfig,
     OrgMembership,
     OrgRole,
     ProviderConnection,
@@ -19,11 +20,13 @@ from src.domain.entities.organization import (
 )
 from src.domain.interfaces.organization_repository import (
     OrganizationRepositoryPort,
+    OrgLicenseConfigRepositoryPort,
     OrgMembershipRepositoryPort,
     ProviderConnectionRepositoryPort,
 )
 from src.infrastructure.persistence.org_models import (
     OrganizationModel,
+    OrgLicenseConfigModel,
     OrgMembershipModel,
     ProviderConnectionModel,
 )
@@ -364,4 +367,74 @@ class SQLAlchemyProviderConnectionRepository(ProviderConnectionRepositoryPort):
             webhook_channel_id=conn.webhook_channel_id,
             created_at=conn.created_at,
             updated_at=conn.updated_at,
+        )
+
+
+# ---------------------------------------------------------------------------
+# License Config Repository
+# ---------------------------------------------------------------------------
+
+
+class SQLAlchemyLicenseConfigRepository(OrgLicenseConfigRepositoryPort):
+    """Persists per-org license configuration (one row per org)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_org(self, org_id: UUID) -> OrgLicenseConfig | None:
+        from datetime import timezone
+
+        result = await self._session.execute(
+            select(OrgLicenseConfigModel).where(OrgLicenseConfigModel.org_id == org_id)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def upsert(self, config: OrgLicenseConfig) -> OrgLicenseConfig:
+        from datetime import datetime, timezone
+
+        result = await self._session.execute(
+            select(OrgLicenseConfigModel).where(
+                OrgLicenseConfigModel.org_id == config.org_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if model:
+            model.seat_cost_cents = config.seat_cost_cents
+            model.max_seats = config.max_seats
+            model.currency = config.currency
+            model.billing_cycle = config.billing_cycle
+            model.notes = config.notes
+            model.updated_at = now
+            await self._session.flush()
+            return self._to_entity(model)
+        else:
+            new_model = OrgLicenseConfigModel(
+                id=config.id,
+                org_id=config.org_id,
+                seat_cost_cents=config.seat_cost_cents,
+                max_seats=config.max_seats,
+                currency=config.currency,
+                billing_cycle=config.billing_cycle,
+                notes=config.notes,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(new_model)
+            await self._session.flush()
+            return config
+
+    @staticmethod
+    def _to_entity(model: OrgLicenseConfigModel) -> OrgLicenseConfig:
+        return OrgLicenseConfig(
+            id=model.id,
+            org_id=model.org_id,
+            seat_cost_cents=model.seat_cost_cents,
+            max_seats=model.max_seats,
+            currency=model.currency,
+            billing_cycle=model.billing_cycle,
+            notes=model.notes,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )

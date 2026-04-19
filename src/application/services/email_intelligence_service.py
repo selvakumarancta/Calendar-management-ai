@@ -40,7 +40,9 @@ _MEETING_PATTERNS = [
     re.compile(r"(?:zoom|teams|meet|webex)\s+(?:meeting|call)", re.I),
     re.compile(r"(?:join|attend)\s+(?:the\s+)?(?:meeting|call|session)", re.I),
     re.compile(r"(?:invite|invitation)\s+(?:to|for)\s+", re.I),
-    re.compile(r"(?:scheduled|rescheduled)\s+(?:a\s+)?(?:meeting|call|appointment)", re.I),
+    re.compile(
+        r"(?:scheduled|rescheduled)\s+(?:a\s+)?(?:meeting|call|appointment)", re.I
+    ),
     re.compile(r"(?:standup|stand-up|sync|1:1|one-on-one)", re.I),
     re.compile(r"let(?:'s| us)\s+(?:meet|schedule|set up|arrange)", re.I),
     re.compile(r"(?:please|can you)\s+(?:schedule|book|arrange|set up)", re.I),
@@ -57,7 +59,9 @@ _MEETING_PATTERNS = [
 ]
 
 _CANCEL_PATTERNS = [
-    re.compile(r"(?:cancel|cancelled|canceled)\s+(?:the\s+)?(?:meeting|call|event)", re.I),
+    re.compile(
+        r"(?:cancel|cancelled|canceled)\s+(?:the\s+)?(?:meeting|call|event)", re.I
+    ),
     re.compile(r"(?:meeting|call|event)\s+(?:has been\s+)?(?:cancel)", re.I),
 ]
 
@@ -80,7 +84,10 @@ _AUTOMATED_PATTERNS = [
 
 # Cold outreach / sales patterns — skip drafting
 _SALES_PATTERNS = [
-    re.compile(r"(?:sales|demo|pitch|proposal|partnership)\s+(?:call|meeting|opportunity)", re.I),
+    re.compile(
+        r"(?:sales|demo|pitch|proposal|partnership)\s+(?:call|meeting|opportunity)",
+        re.I,
+    ),
     re.compile(r"(?:would love to)\s+(?:connect|chat|discuss|show you)", re.I),
     re.compile(r"(?:15|30)\s+min(?:utes?)?\s+(?:call|chat|intro)", re.I),
     re.compile(r"(?:investor|VC|venture capital|fundraising)", re.I),
@@ -97,7 +104,9 @@ _DATE_PATTERNS = [
     re.compile(r"(today|tomorrow|day after tomorrow)", re.I),
     re.compile(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)", re.I),
     re.compile(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", re.I),
-    re.compile(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})", re.I),
+    re.compile(
+        r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})", re.I
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -369,14 +378,19 @@ class EmailIntelligenceService:
             if not rescan:
                 emails = await self._filter_processed(user_id, emails)
             else:
-                logger.info("rescan=True: skipping already-processed filter for user %s", user_id)
+                logger.info(
+                    "rescan=True: skipping already-processed filter for user %s",
+                    user_id,
+                )
 
             # 3. Load user guides once for the session
             scheduling_guide: str = ""
             style_guide: str = ""
             if self._guides_service:
                 try:
-                    scheduling_guide, style_guide = await self._guides_service.get_user_guides(user_id)
+                    scheduling_guide, style_guide = (
+                        await self._guides_service.get_user_guides(user_id)
+                    )
                 except Exception as e:
                     logger.debug("Could not load user guides: %s", e)
 
@@ -413,16 +427,18 @@ class EmailIntelligenceService:
                             result.actionable_found += 1
                             draft = None
                             try:
-                                draft = await self._draft_composer.compose_and_create_draft(
-                                    email=email,
-                                    classification=clf_response,
-                                    user_id=user_id,
-                                    user_email=user_email,
-                                    user_timezone=user_timezone,
-                                    email_provider=email_provider,
-                                    email_style_guide=style_guide,
-                                    scheduling_preferences_guide=scheduling_guide,
-                                    autopilot_enabled=autopilot,
+                                draft = (
+                                    await self._draft_composer.compose_and_create_draft(
+                                        email=email,
+                                        classification=clf_response,
+                                        user_id=user_id,
+                                        user_email=user_email,
+                                        user_timezone=user_timezone,
+                                        email_provider=email_provider,
+                                        email_style_guide=style_guide,
+                                        scheduling_preferences_guide=scheduling_guide,
+                                        autopilot_enabled=autopilot,
+                                    )
                                 )
                                 if draft:
                                     logger.info(
@@ -432,7 +448,9 @@ class EmailIntelligenceService:
                                     )
                             except Exception as e:
                                 logger.warning(
-                                    "Draft composer failed for '%s': %s", email.subject, e
+                                    "Draft composer failed for '%s': %s",
+                                    email.subject,
+                                    e,
                                 )
 
                             # Always create a pending suggestion for meeting emails
@@ -493,7 +511,8 @@ class EmailIntelligenceService:
                             already_resolved_analysis = EmailAnalysis(
                                 email_id=email.id,
                                 category=clf_response.category,
-                                is_actionable=clf_response.category in _MEETING_CATEGORIES,
+                                is_actionable=clf_response.category
+                                in _MEETING_CATEGORIES,
                                 confidence=clf_response.confidence,
                                 summary=clf_response.summary,
                                 suggested_title=email.subject,
@@ -576,7 +595,9 @@ class EmailIntelligenceService:
                                 email=email,
                                 analysis=nd_analysis,
                                 user_id=user_id,
-                                suggestion_id=nd_suggestion.id if nd_suggestion else None,
+                                suggestion_id=(
+                                    nd_suggestion.id if nd_suggestion else None
+                                ),
                             )
                             continue
 
@@ -1205,9 +1226,7 @@ class EmailIntelligenceService:
                         is_actionable=analysis.is_actionable,
                         analysis_category=analysis.category.value,
                         analysis_confidence=analysis.confidence,
-                        analysis_summary=(
-                            analysis.summary or analysis.action_required
-                        ),
+                        analysis_summary=(analysis.summary or analysis.action_required),
                         suggestion_id=suggestion_id,
                     )
                     session.add(model)
@@ -1348,9 +1367,11 @@ class EmailIntelligenceService:
         # Determine target date using the user's local "now"
         try:
             from zoneinfo import ZoneInfo
+
             tz = ZoneInfo(user_timezone)
         except Exception:
             from datetime import timezone as _tz
+
             tz = timezone.utc
 
         local_now = reference_date.astimezone(tz)
@@ -1412,6 +1433,7 @@ class EmailIntelligenceService:
 
         # Build as local time then convert to UTC
         from zoneinfo import ZoneInfo as _ZI
+
         try:
             local_tz = _ZI(user_timezone)
         except Exception:

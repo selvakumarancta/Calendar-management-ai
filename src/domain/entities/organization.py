@@ -14,10 +14,10 @@ from enum import Enum
 class OrgRole(str, Enum):
     """Roles within an organization."""
 
-    OWNER = "owner"
-    ADMIN = "admin"
-    MEMBER = "member"
-    VIEWER = "viewer"
+    OWNER = "owner"  # Super-admin: one per org, full control
+    ADMIN = "admin"  # Can manage members, providers, org settings
+    MEMBER = "member"  # Can create events, use email intelligence
+    VIEWER = "viewer"  # Read-only access to org data
 
 
 class ProviderType(str, Enum):
@@ -116,3 +116,36 @@ class ProviderConnection:
         self.token_expiry = expiry
         self.status = ConnectionStatus.ACTIVE
         self.updated_at = datetime.now(timezone.utc)
+
+
+@dataclass
+class OrgLicenseConfig:
+    """
+    Per-organization license configuration.
+
+    Defines how many seats (user licenses) are allowed and the cost per seat.
+    OWNER/ADMIN can configure; the billing layer uses this to compute invoices.
+    """
+
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    org_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    seat_cost_cents: int = 0  # Price per licensed seat in cents (0 = custom / free)
+    max_seats: int = 5  # Maximum concurrent licensed users
+    currency: str = "USD"  # ISO 4217 currency code
+    billing_cycle: str = "monthly"  # "monthly" | "annual"
+    notes: str = ""  # Admin-visible notes (e.g. contract ref)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def seat_cost_dollars(self) -> float:
+        """Seat cost expressed in dollars (for display)."""
+        return self.seat_cost_cents / 100
+
+    def calculate_total_cost_cents(self, active_seats: int) -> int:
+        """
+        Return the total license cost in cents for *active_seats* users.
+        Capped at max_seats if the org has grown beyond its license.
+        """
+        billed_seats = min(active_seats, self.max_seats)
+        return billed_seats * self.seat_cost_cents

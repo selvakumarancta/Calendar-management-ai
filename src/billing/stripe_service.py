@@ -24,9 +24,17 @@ class StripeBillingService:
         self._webhook_secret = webhook_secret
         self._price_ids = price_ids
 
-    async def create_customer(self, email: str, name: str) -> str:
+    async def create_customer(
+        self,
+        email: str,
+        name: str,
+        idempotency_key: str = "",
+    ) -> str:
         """Create a Stripe customer. Returns customer ID."""
-        customer = stripe.Customer.create(email=email, name=name)
+        kwargs: dict[str, Any] = {"email": email, "name": name}
+        if idempotency_key:
+            kwargs["idempotency_key"] = idempotency_key
+        customer = stripe.Customer.create(**kwargs)
         return customer.id
 
     async def create_checkout_session(
@@ -35,13 +43,14 @@ class StripeBillingService:
         plan: PlanTier,
         success_url: str,
         cancel_url: str,
+        idempotency_key: str = "",
     ) -> str:
         """Create a Stripe Checkout Session. Returns session URL."""
         price_id = self._price_ids.get(plan)
         if not price_id:
             raise ValueError(f"No Stripe price ID configured for plan: {plan}")
 
-        session = stripe.checkout.Session.create(
+        kwargs: dict[str, Any] = dict(
             customer=customer_id,
             payment_method_types=["card"],
             line_items=[{"price": price_id, "quantity": 1}],
@@ -49,6 +58,9 @@ class StripeBillingService:
             success_url=success_url,
             cancel_url=cancel_url,
         )
+        if idempotency_key:
+            kwargs["idempotency_key"] = idempotency_key
+        session = stripe.checkout.Session.create(**kwargs)
         return session.url or ""
 
     async def cancel_subscription(self, subscription_id: str) -> bool:

@@ -25,6 +25,32 @@ document.addEventListener("DOMContentLoaded", () => {
       if (btn.dataset.view) switchView(btn.dataset.view);
     });
   });
+
+  // Keyboard shortcuts
+  document.addEventListener("keydown", e => {
+    // Ignore when typing in an input/textarea or a modal is open
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (document.querySelector(".modal-overlay[style*='flex']")) return;
+    if (e.key === "n" || e.key === "N") {
+      // N → New Event (only when calendar view is active)
+      if (document.getElementById("calendar-view")?.classList.contains("active")) {
+        e.preventDefault();
+        openCreateEventModal();
+      }
+    }
+    if (e.key === "ArrowLeft" && document.getElementById("calendar-view")?.classList.contains("active")) {
+      shiftWeek(-1);
+    }
+    if (e.key === "ArrowRight" && document.getElementById("calendar-view")?.classList.contains("active")) {
+      shiftWeek(1);
+    }
+    if (e.key === "t" || e.key === "T") {
+      if (document.getElementById("calendar-view")?.classList.contains("active")) {
+        weekOffset = 0; loadEvents();
+      }
+    }
+  });
 });
 
 // ── Auth ───────────────────────────────────────────────────────
@@ -53,6 +79,96 @@ async function loginDev() {
     showApp();
   } catch (e) { showToast("Dev login failed: " + e.message, "error"); }
 }
+
+// ── Email / Password Auth ──────────────────────────────────────
+
+function showLoginPanel() {
+  document.getElementById("login-email-panel").style.display = "flex";
+  document.getElementById("login-register-panel").style.display = "none";
+  document.getElementById("login-forgot-panel").style.display = "none";
+}
+function showRegisterPanel() {
+  document.getElementById("login-email-panel").style.display = "none";
+  document.getElementById("login-register-panel").style.display = "flex";
+  document.getElementById("login-forgot-panel").style.display = "none";
+  setTimeout(() => document.getElementById("reg-name").focus(), 50);
+}
+function showForgotPanel() {
+  document.getElementById("login-email-panel").style.display = "none";
+  document.getElementById("login-register-panel").style.display = "none";
+  document.getElementById("login-forgot-panel").style.display = "flex";
+  setTimeout(() => document.getElementById("forgot-email").focus(), 50);
+}
+
+async function loginEmail() {
+  const email    = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  if (!email || !password) { showToast("Enter email and password", "error"); return; }
+  try {
+    const res = await api("POST", "/api/v1/auth/login", { email, password });
+    token = res.access_token;
+    refreshToken = res.refresh_token || null;
+    localStorage.setItem("token", token);
+    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    showApp();
+  } catch (e) { showToast(e.message || "Login failed", "error"); }
+}
+
+async function registerEmail() {
+  const name     = document.getElementById("reg-name").value.trim();
+  const email    = document.getElementById("reg-email").value.trim();
+  const password = document.getElementById("reg-password").value;
+  if (!email || !password) { showToast("Email and password are required", "error"); return; }
+  if (password.length < 8) { showToast("Password must be at least 8 characters", "error"); return; }
+  try {
+    const res = await api("POST", "/api/v1/auth/register", { name, email, password });
+    token = res.access_token;
+    refreshToken = res.refresh_token || null;
+    localStorage.setItem("token", token);
+    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    showApp();
+  } catch (e) { showToast(e.message || "Registration failed", "error"); }
+}
+
+async function submitForgotPassword() {
+  const email = document.getElementById("forgot-email").value.trim();
+  if (!email) { showToast("Enter your email address", "error"); return; }
+  const btn = document.getElementById("btn-forgot-submit");
+  const msg = document.getElementById("forgot-msg");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const res = await api("POST", "/api/v1/auth/forgot-password", { email });
+    msg.textContent = res.detail || "Check your inbox for a reset link.";
+    msg.style.display = "block";
+    btn.textContent = "Sent ✓";
+  } catch (e) {
+    showToast(e.message || "Failed", "error");
+    btn.disabled = false; btn.textContent = "Send Reset Link";
+  }
+}
+
+// ── Theme toggle ───────────────────────────────────────────────
+
+function toggleTheme() {
+  const isLight = document.documentElement.dataset.theme === "light";
+  const next = isLight ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("theme", next);
+  document.getElementById("theme-icon").textContent = next === "light" ? "🌙" : "☀️";
+}
+
+// Apply saved or system theme on load
+(function initTheme() {
+  const saved = localStorage.getItem("theme");
+  const prefer = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  const theme = saved || prefer;
+  if (theme === "light") {
+    document.documentElement.dataset.theme = "light";
+    // Icon will be set after DOM ready; set immediately if possible
+    const ic = document.getElementById("theme-icon");
+    if (ic) ic.textContent = "🌙";
+  }
+})();
 
 function logout() {
   token = null; refreshToken = null; conversationId = null; currentOrgId = null;
@@ -398,7 +514,27 @@ function _doConnectWS() {
     setStatus(false);
     if (token && wsRetryCount < WS_MAX_RETRIES) {
       wsRetryCount++;
-      setTimeout(_doConnectWS, 3000 * wsRetryCount);
+      // Attempt to refresh the access token before reconnecting so the
+      // new WS connection doesn't send an expired JWT in its messages.
+      const delay = 3000 * wsRetryCount;
+      setTimeout(async () => {
+        if (refreshToken) {
+          try {
+            const r = await fetch("/api/v1/auth/refresh", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": "Bearer " + refreshToken },
+            });
+            if (r.ok) {
+              const t = await r.json();
+              token = t.access_token;
+              if (t.refresh_token) refreshToken = t.refresh_token;
+              localStorage.setItem("token", token);
+              if (t.refresh_token) localStorage.setItem("refresh_token", refreshToken);
+            }
+          } catch (_) { /* use existing token */ }
+        }
+        _doConnectWS();
+      }, delay);
     }
   };
   ws.onerror = () => ws.close();
@@ -434,6 +570,10 @@ function setStatus(online) {
 
 // ── Calendar ───────────────────────────────────────────────────
 
+// Keyed event store populated on each loadEvents() call.
+// Allows edit/delete functions to look up full event data by ID.
+let _eventsById = {};
+
 async function loadEvents() {
   const list = document.getElementById("events-list");
   const now = new Date();
@@ -444,18 +584,43 @@ async function loadEvents() {
   end.setDate(end.getDate() + 7);
   end.setHours(23, 59, 59, 999); // include all events on the last day of the week
 
+  // Show contextual label + date range
+  const isCurrentWeek = weekOffset === 0;
   const opts = { month: "short", day: "numeric" };
-  document.getElementById("week-label").textContent =
-    start.toLocaleDateString(undefined, opts) + " — " + end.toLocaleDateString(undefined, opts);
+  const dateRange = start.toLocaleDateString(undefined, opts) + " — " + end.toLocaleDateString(undefined, opts);
+  let contextLabel = "";
+  if (weekOffset === 0) contextLabel = "This week";
+  else if (weekOffset === 1) contextLabel = "Next week";
+  else if (weekOffset === -1) contextLabel = "Last week";
+  else if (weekOffset > 1) contextLabel = `${weekOffset} weeks ahead`;
+  else contextLabel = `${Math.abs(weekOffset)} weeks ago`;
+  const weekLbl = document.getElementById("week-label");
+  weekLbl.innerHTML = `<span class="week-context-label">${contextLabel}</span> <span class="week-date-range">${dateRange}</span>`;
+
+  // Today's date string for highlight
+  const todayStr = now.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 
   try {
     const events = await api("GET",
       `/api/v1/calendar/events?start=${start.toISOString()}&end=${end.toISOString()}`);
 
     if (!events.length) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div>No events this week</div>';
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div>No events this week. Click <strong>New Event</strong> to add one.</div>';
+      const badge = document.getElementById("nav-event-count");
+      if (badge) { badge.style.display = "none"; }
       return;
     }
+
+    // Update sidebar badge
+    const badge = document.getElementById("nav-event-count");
+    if (badge) {
+      badge.textContent = events.length;
+      badge.style.display = events.length ? "inline-flex" : "none";
+    }
+
+    // Rebuild event store for edit/delete lookups
+    _eventsById = {};
+    events.forEach(ev => { _eventsById[ev.id] = ev; });
 
     // Ensure times are parsed as UTC (API returns naive ISO strings without Z)
     const toUtc = s => s.endsWith('Z') || s.includes('+') ? s : s + 'Z';
@@ -468,9 +633,11 @@ async function loadEvents() {
       (groups[day] = groups[day] || []).push(ev);
     });
 
-    list.innerHTML = Object.entries(groups).map(([day, evts]) => `
-      <div class="day-group">
-        <div class="day-label">${day}</div>
+    list.innerHTML = Object.entries(groups).map(([day, evts]) => {
+      const isToday = day === todayStr;
+      return `
+      <div class="day-group${isToday ? ' day-group-today' : ''}">
+        <div class="day-label">${day}${isToday ? ' <span class="today-badge">Today</span>' : ''}</div>
         ${evts.map((ev) => {
           const start = new Date(toUtc(ev.start_time));
           const end   = new Date(toUtc(ev.end_time));
@@ -543,18 +710,43 @@ async function loadEvents() {
                 <span>🆔 ${esc(ev.provider_event_id || ev.id || '')}</span>
                 ${ev.is_all_day ? '<span>📅 All-day event</span>' : ''}
                 <span class="ev-badge ${statusCls}">${status}</span>
+                <div class="ev-actions" onclick="event.stopPropagation()">
+                  <button class="btn btn-ghost btn-xs" onclick="openEditEventModal('${esc(ev.id)}')">✏️ Edit</button>
+                  <button class="btn btn-danger-ghost btn-xs" onclick="deleteEvent('${esc(ev.id)}')">🗑 Delete</button>
+                  <a class="btn btn-ghost btn-xs" href="/api/v1/calendar/events/${esc(ev.id)}/ics" download>📅 .ics</a>
+                </div>
               </div>
             </div>
           </div>`;
         }).join("")}
-      </div>
-    `).join("");
+      </div>`;
+    }).join("");
   } catch (err) {
     list.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
   }
 }
 
-function shiftWeek(delta) { weekOffset += delta; loadEvents(); }
+function shiftWeek(delta) {
+  weekOffset += delta;
+  document.getElementById("ev-search").value = "";
+  loadEvents();
+}
+
+function filterEvents(query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll(".event-card").forEach(card => {
+    const title = card.querySelector(".ev-title")?.textContent.toLowerCase() || "";
+    const loc   = card.querySelector(".ev-loc-row")?.textContent.toLowerCase() || "";
+    const desc  = card.querySelector(".ev-exp-desc")?.textContent.toLowerCase() || "";
+    const match = !q || title.includes(q) || loc.includes(q) || desc.includes(q);
+    card.style.display = match ? "" : "none";
+  });
+  // Hide empty day-groups
+  document.querySelectorAll(".day-group").forEach(grp => {
+    const visible = [...grp.querySelectorAll(".event-card")].some(c => c.style.display !== "none");
+    grp.style.display = visible ? "" : "none";
+  });
+}
 
 function toggleEvDetail(card) {
   const expanded = card.querySelector(".ev-expanded");
@@ -564,6 +756,233 @@ function toggleEvDetail(card) {
   expanded.style.display = open ? "none" : "block";
   chevron.textContent = open ? "▸" : "▾";
   card.classList.toggle("ev-open", !open);
+}
+
+// ── Delete / Edit events ───────────────────────────────────────
+
+async function deleteEvent(eventId) {
+  const ev = _eventsById[eventId];
+  const title = ev ? ev.title : "this event";
+  if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", `/api/v1/calendar/events/${encodeURIComponent(eventId)}`);
+    showToast(`🗑 "${title}" deleted`);
+    await loadEvents();
+  } catch (err) {
+    showToast("Delete failed: " + err.message, "error");
+  }
+}
+
+function openEditEventModal(eventId) {
+  const ev = _eventsById[eventId];
+  if (!ev) { showToast("Event not found", "error"); return; }
+
+  // Store the editing ID so submitCreateEvent knows to PATCH instead of POST
+  _editingEventId = eventId;
+
+  const toLocal = d => {
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const startD = new Date(ev.start_time.endsWith('Z') || ev.start_time.includes('+') ? ev.start_time : ev.start_time + 'Z');
+  const endD   = new Date(ev.end_time.endsWith('Z') || ev.end_time.includes('+') ? ev.end_time : ev.end_time + 'Z');
+
+  document.getElementById("ev-title").value = ev.title || "";
+  document.getElementById("ev-location").value = ev.location || "";
+  document.getElementById("ev-description").value = ev.description || "";
+  document.getElementById("ev-attendees").value = (ev.attendees || []).filter(a => !a.includes("(organizer)")).join(", ");
+  document.getElementById("ev-allday").checked = ev.is_all_day || false;
+  document.getElementById("ev-start").value = toLocal(startD);
+  document.getElementById("ev-end").value = toLocal(endD);
+  document.getElementById("ev-reminder").value = "15";
+  document.getElementById("ev-error").style.display = "none";
+
+  // Reset type chips to default
+  _selectedEventType = "meeting";
+  document.querySelectorAll(".type-chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.type === "meeting")
+  );
+
+  // Update modal title and submit button for edit mode
+  document.querySelector("#create-event-modal .modal-header h3").textContent = "Edit Event";
+  document.getElementById("btn-create-event").innerHTML =
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Save Changes`;
+
+  document.getElementById("create-event-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("ev-title").focus(), 80);
+}
+
+// ── Create Event Modal ─────────────────────────────────────────
+
+const EVENT_TYPE_PREFIXES = {
+  meeting: "",
+  team: "Team: ",
+  focus: "Focus: ",
+  outlook: "",
+  other: "",
+};
+
+let _selectedEventType = "meeting";
+let _editingEventId = null;  // null = create mode, string = edit mode
+
+function openCreateEventModal() {
+  _editingEventId = null;
+  // Reset modal header for create mode
+  document.querySelector("#create-event-modal .modal-header h3").textContent = "New Calendar Event";
+  document.getElementById("btn-create-event").innerHTML =
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Create Event`;
+  // Default times: next round hour → +1 hour
+  const now = new Date();
+  now.setMinutes(0, 0, 0);
+  now.setHours(now.getHours() + 1);
+  const end = new Date(now.getTime() + 60 * 60 * 1000);
+
+  const toLocal = d => {
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  document.getElementById("ev-start").value = toLocal(now);
+  document.getElementById("ev-end").value = toLocal(end);
+  document.getElementById("ev-title").value = "";
+  document.getElementById("ev-location").value = "";
+  document.getElementById("ev-attendees").value = "";
+  document.getElementById("ev-description").value = "";
+  document.getElementById("ev-allday").checked = false;
+  document.getElementById("ev-reminder").value = "15";
+  document.getElementById("ev-error").style.display = "none";
+  document.getElementById("ev-start").closest(".form-group").style.display = "";
+  document.getElementById("ev-end").closest(".form-group").style.display = "";
+
+  // Reset type chips
+  _selectedEventType = "meeting";
+  document.querySelectorAll(".type-chip").forEach(c =>
+    c.classList.toggle("active", c.dataset.type === "meeting")
+  );
+
+  document.getElementById("create-event-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("ev-title").focus(), 80);
+}
+
+function closeCreateEventModal(e) {
+  if (e && e.target !== document.getElementById("create-event-modal")) return;
+  _editingEventId = null;
+  document.getElementById("create-event-modal").style.display = "none";
+}
+
+function selectEventType(btn) {
+  document.querySelectorAll(".type-chip").forEach(c => c.classList.remove("active"));
+  btn.classList.add("active");
+  _selectedEventType = btn.dataset.type;
+  // Pre-fill title prefix if title is empty
+  const titleEl = document.getElementById("ev-title");
+  const prefix = EVENT_TYPE_PREFIXES[_selectedEventType] || "";
+  if (!titleEl.value || Object.values(EVENT_TYPE_PREFIXES).some(p => p && titleEl.value === p)) {
+    titleEl.value = prefix;
+    titleEl.focus();
+    titleEl.setSelectionRange(prefix.length, prefix.length);
+  }
+}
+
+function toggleAllDay() {
+  const allDay = document.getElementById("ev-allday").checked;
+  const startGroup = document.getElementById("ev-start").closest(".form-group");
+  const endGroup = document.getElementById("ev-end").closest(".form-group");
+  if (allDay) {
+    // Replace datetime-local with date inputs
+    document.getElementById("ev-start").type = "date";
+    document.getElementById("ev-end").type = "date";
+  } else {
+    document.getElementById("ev-start").type = "datetime-local";
+    document.getElementById("ev-end").type = "datetime-local";
+  }
+}
+
+async function submitCreateEvent() {
+  const btn = document.getElementById("btn-create-event");
+  const errEl = document.getElementById("ev-error");
+  errEl.style.display = "none";
+
+  const title = document.getElementById("ev-title").value.trim();
+  if (!title) { showEvError("Title is required."); return; }
+
+  const allDay = document.getElementById("ev-allday").checked;
+
+  let startRaw = document.getElementById("ev-start").value;
+  let endRaw   = document.getElementById("ev-end").value;
+  if (!startRaw || !endRaw) { showEvError("Start and end date/time are required."); return; }
+
+  // Build ISO strings — if all-day, use noon UTC to avoid timezone edge cases
+  let startIso, endIso;
+  if (allDay) {
+    startIso = new Date(startRaw + "T12:00:00Z").toISOString();
+    endIso   = new Date(endRaw   + "T12:00:00Z").toISOString();
+  } else {
+    startIso = new Date(startRaw).toISOString();
+    endIso   = new Date(endRaw).toISOString();
+  }
+
+  if (new Date(endIso) <= new Date(startIso)) {
+    showEvError("End time must be after start time."); return;
+  }
+
+  const rawAttendees = document.getElementById("ev-attendees").value;
+  const attendeeEmails = rawAttendees
+    .split(/[,;\s]+/)
+    .map(e => e.trim())
+    .filter(e => e.includes("@"));
+
+  const isEdit = !!_editingEventId;
+
+  btn.disabled = true;
+  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> ${isEdit ? 'Saving…' : 'Creating…'}`;
+
+  try {
+    let result;
+    if (isEdit) {
+      // PATCH — only send changed fields
+      const patchPayload = {
+        title,
+        description: document.getElementById("ev-description").value.trim() || null,
+        location:    document.getElementById("ev-location").value.trim() || null,
+        start_time:  startIso,
+        end_time:    endIso,
+        attendee_emails: attendeeEmails,
+      };
+      result = await api("PATCH", `/api/v1/calendar/events/${encodeURIComponent(_editingEventId)}`, patchPayload);
+      closeCreateEventModal();
+      showToast(`✅ "${result.title || title}" updated!`);
+    } else {
+      const payload = {
+        title,
+        description: document.getElementById("ev-description").value.trim() || null,
+        location:    document.getElementById("ev-location").value.trim() || null,
+        start_time:  startIso,
+        end_time:    endIso,
+        is_all_day:  allDay,
+        attendee_emails: attendeeEmails,
+        reminder_minutes: parseInt(document.getElementById("ev-reminder").value) || 0,
+        calendar_id: "primary",
+      };
+      result = await api("POST", "/api/v1/calendar/events", payload);
+      closeCreateEventModal();
+      showToast(`✅ "${result.title || title}" created!`);
+    }
+    weekOffset = 0;
+    await loadEvents();
+  } catch (err) {
+    showEvError(err.message || (isEdit ? "Failed to update event." : "Failed to create event."));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Create Event`;
+  }
+}
+
+function showEvError(msg) {
+  const el = document.getElementById("ev-error");
+  el.textContent = msg;
+  el.style.display = "block";
 }
 
 // ── Profile ────────────────────────────────────────────────────
@@ -576,8 +995,6 @@ async function loadProfile() {
       ? Math.round((u.monthly_requests_used / u.monthly_request_limit) * 100) : 0;
     el.innerHTML = `
       <div class="profile-row"><span class="profile-label">Email</span><span class="profile-value">${esc(u.email)}</span></div>
-      <div class="profile-row"><span class="profile-label">Name</span><span class="profile-value">${esc(u.name)}</span></div>
-      <div class="profile-row"><span class="profile-label">Timezone</span><span class="profile-value">${esc(u.timezone)}</span></div>
       <div class="profile-row"><span class="profile-label">Plan</span><span class="profile-value" style="text-transform:capitalize">${esc(u.plan)}</span></div>
       <div class="profile-row"><span class="profile-label">Organizations</span><span class="profile-value">${orgs.length}</span></div>
       <div class="profile-row">
@@ -588,9 +1005,82 @@ async function loadProfile() {
         </span>
       </div>
     `;
+    // Pre-fill edit fields
+    const nameEl = document.getElementById("profile-name");
+    const tzEl   = document.getElementById("profile-timezone");
+    if (nameEl) nameEl.value = u.name || "";
+    if (tzEl)   tzEl.value  = u.timezone || "";
   } catch (err) {
     el.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
   }
+}
+
+async function saveProfile() {
+  const name = document.getElementById("profile-name").value.trim();
+  const timezone = document.getElementById("profile-timezone").value.trim();
+  const indicator = document.getElementById("profile-save-indicator");
+  if (!name && !timezone) { showToast("Enter a name or timezone to update", "error"); return; }
+  indicator.textContent = "Saving…"; indicator.className = "save-indicator saving";
+  try {
+    const params = new URLSearchParams();
+    if (name) params.set("name", name);
+    if (timezone) params.set("timezone", timezone);
+    await api("PATCH", `/api/v1/auth/me?${params}`);
+    indicator.textContent = "✓ Saved"; indicator.className = "save-indicator success";
+    setTimeout(() => { indicator.textContent = ""; indicator.className = "save-indicator"; }, 3000);
+    showToast("Profile updated!");
+  } catch (err) {
+    indicator.textContent = "✕ " + err.message; indicator.className = "save-indicator error";
+    setTimeout(() => { indicator.textContent = ""; indicator.className = "save-indicator"; }, 4000);
+  }
+}
+
+// ── Change Password modal ──────────────────────────────────────
+
+function openChangePasswordModal() {
+  document.getElementById("cp-old").value = "";
+  document.getElementById("cp-new").value = "";
+  document.getElementById("cp-confirm").value = "";
+  document.getElementById("cp-error").style.display = "none";
+  document.getElementById("change-password-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("cp-old").focus(), 80);
+}
+
+function closeChangePasswordModal(e) {
+  if (e && e.target !== document.getElementById("change-password-modal")) return;
+  document.getElementById("change-password-modal").style.display = "none";
+}
+
+async function submitChangePassword() {
+  const oldPw  = document.getElementById("cp-old").value;
+  const newPw  = document.getElementById("cp-new").value;
+  const confirm = document.getElementById("cp-confirm").value;
+  const errEl  = document.getElementById("cp-error");
+  errEl.style.display = "none";
+
+  if (!oldPw || !newPw) { showCpError("All fields are required."); return; }
+  if (newPw.length < 8)  { showCpError("New password must be at least 8 characters."); return; }
+  if (newPw !== confirm)  { showCpError("Passwords do not match."); return; }
+
+  const btn = document.getElementById("btn-change-password");
+  btn.disabled = true; btn.textContent = "Updating…";
+  try {
+    await api("POST", "/api/v1/auth/change-password", {
+      old_password: oldPw, new_password: newPw,
+    });
+    closeChangePasswordModal();
+    showToast("Password changed — please sign in again");
+    logout();
+  } catch (err) {
+    showCpError(err.message || "Failed to change password.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Update Password";
+  }
+}
+
+function showCpError(msg) {
+  const el = document.getElementById("cp-error");
+  el.textContent = msg; el.style.display = "block";
 }
 
 // ── Settings ───────────────────────────────────────────────────
@@ -1209,8 +1699,33 @@ let schedulingCurrentTab = "links";
 let createdLinks = [];
 
 async function loadSchedulingView() {
-  try { await loadGuides(); } catch (_) {}
-  try { await loadOnboardingStatus(); } catch (_) {}
+  await Promise.allSettled([
+    loadGuides(),
+    loadOnboardingStatus(),
+    _loadExistingSchedulingLinks(),
+  ]);
+}
+
+async function _loadExistingSchedulingLinks() {
+  try {
+    const links = await api("GET", "/api/v1/email/scheduling-links");
+    // Merge fetched links into createdLinks (de-dup by url)
+    const existingUrls = new Set(createdLinks.map(l => l.url));
+    links.forEach(l => {
+      if (!existingUrls.has(l.url)) {
+        createdLinks.push({
+          url: l.url,
+          mode: l.mode || "availability",
+          attendee: l.attendee_email || "",
+          duration: l.duration_minutes || 30,
+          created_at: l.created_at || new Date().toISOString(),
+          id: l.id,
+          is_active: l.is_active !== false,
+        });
+      }
+    });
+    renderSchedulingLinks();
+  } catch (_) { /* non-fatal */ }
 }
 
 function switchSchedulingTab(tab) {

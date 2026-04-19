@@ -33,10 +33,15 @@ class User:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    # OAuth tokens (encrypted at rest in infra layer)
+    # Google OAuth tokens (encrypted at rest in infra layer)
     google_access_token: str | None = None
     google_refresh_token: str | None = None
     google_token_expiry: datetime | None = None
+
+    # Microsoft OAuth tokens (encrypted at rest in infra layer)
+    microsoft_access_token: str | None = None
+    microsoft_refresh_token: str | None = None
+    microsoft_token_expiry: datetime | None = None
 
     # Stripe
     stripe_customer_id: str | None = None

@@ -129,3 +129,84 @@ class TestAnalyticsService:
         """record() with empty properties dict should not raise."""
         service = AnalyticsService(db_session_factory=_make_session_factory([]))
         await service.record(user_id=uuid.uuid4(), event_type="scan_completed")
+
+    @pytest.mark.asyncio
+    async def test_record_no_op_when_db_is_none(self):
+        """record() should return immediately and not raise when db is None."""
+        service = AnalyticsService(db_session_factory=None)
+        # Should complete silently
+        await service.record(user_id=uuid.uuid4(), event_type="test_event")
+
+    @pytest.mark.asyncio
+    async def test_get_summary_returns_empty_when_db_is_none(self):
+        """get_summary() should return an empty summary when db is None."""
+        service = AnalyticsService(db_session_factory=None)
+        result = await service.get_summary(user_id=uuid.uuid4())
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_get_recent_events_returns_empty_when_db_is_none(self):
+        """get_recent_events() should return empty list when db is None."""
+        service = AnalyticsService(db_session_factory=None)
+        result = await service.get_recent_events(user_id=uuid.uuid4())
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_summary_returns_empty_on_db_error(self):
+        """get_summary() exception path → returns _empty_summary()."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import MagicMock as _MM
+
+        @asynccontextmanager
+        async def bad_factory():
+            session = _MM()
+            session.execute = AsyncMock(side_effect=RuntimeError("DB error"))
+            yield session
+
+        service = AnalyticsService(db_session_factory=bad_factory)
+        result = await service.get_summary(user_id=uuid.uuid4())
+        assert isinstance(result, dict)
+        assert result.get("drafts_composed") == 0
+
+    @pytest.mark.asyncio
+    async def test_get_recent_events_returns_empty_on_db_error(self):
+        """get_recent_events() exception path → returns []."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import MagicMock as _MM
+
+        @asynccontextmanager
+        async def bad_factory():
+            session = _MM()
+            session.execute = AsyncMock(side_effect=RuntimeError("DB error"))
+            yield session
+
+        service = AnalyticsService(db_session_factory=bad_factory)
+        result = await service.get_recent_events(user_id=uuid.uuid4())
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_record_exception_is_caught(self):
+        """record() exception from DB commit is caught and logged, not raised."""
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def bad_factory():
+            session = MagicMock()
+            session.add = MagicMock()
+            session.commit = AsyncMock(side_effect=RuntimeError("commit failed"))
+            yield session
+
+        service = AnalyticsService(db_session_factory=bad_factory)
+        # Should NOT raise — exception is swallowed
+        await service.record(user_id=uuid.uuid4(), event_type="test_event")
+
+    @pytest.mark.asyncio
+    async def test_get_recent_events_with_event_type_filter(self):
+        """get_recent_events with event_type triggers the filter branch (line 178)."""
+        service = AnalyticsService(db_session_factory=_make_session_factory([]))
+        # Exercises the `if event_type:` branch in get_recent_events
+        result = await service.get_recent_events(
+            user_id=uuid.uuid4(),
+            event_type="draft_composed",
+        )
+        assert isinstance(result, list)

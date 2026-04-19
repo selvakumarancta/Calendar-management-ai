@@ -5,7 +5,7 @@ Coordinates between domain entities, calendar provider, and repository.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from src.application.dto import (
@@ -60,7 +60,7 @@ class CalendarService:
         dto_start_utc = _utc(dto.start_time)
         dto_end_utc = _utc(dto.end_time)
 
-        if dto_start_utc < datetime.now(_tz.utc):
+        if dto_start_utc < datetime.now(_tz.utc) - timedelta(minutes=10):
             raise EventInPastError()
 
         # Check for conflicts

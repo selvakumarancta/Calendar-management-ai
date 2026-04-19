@@ -15,6 +15,17 @@ class PlanTier(str, Enum):
     ENTERPRISE = "enterprise"
 
 
+# Capability tags assigned to plans — do NOT hard-code model names here.
+# Model-name allow-listing is done by ChatService using active settings,
+# so upgrading LLM versions requires no plan changes.
+_FREE_FEATURES = "basic_crud list_events single_calendar"
+_PRO_FEATURES = "basic_crud list_events smart_scheduling conflict_detection multi_calendar free_slot_finder"
+_BUSINESS_FEATURES = (
+    _PRO_FEATURES + " team_calendars api_access priority_routing webhook_notifications"
+)
+_ENTERPRISE_FEATURES = "all"
+
+
 @dataclass(frozen=True)
 class PlanDefinition:
     """Immutable plan configuration."""
@@ -24,17 +35,13 @@ class PlanDefinition:
     monthly_price_usd: float
     monthly_request_limit: int
     max_calendars: int
-    model_access: list[str]  # Which LLM models the plan allows
+    allows_primary_model: bool
+    """True if this plan may use the expensive/primary LLM model."""
     features: list[str]
 
-    @property
-    def allows_primary_model(self) -> bool:
-        """Check if plan allows expensive primary models (any provider)."""
-        primary_models = {"gpt-4o", "claude-sonnet-4-20250514"}
-        return bool(primary_models & set(self.model_access))
 
-
-# Plan catalog
+# Plan catalog — model names intentionally omitted.
+# Gate model access via User.can_use_primary_model() which reads this flag.
 PLANS: dict[PlanTier, PlanDefinition] = {
     PlanTier.FREE: PlanDefinition(
         tier=PlanTier.FREE,
@@ -42,8 +49,8 @@ PLANS: dict[PlanTier, PlanDefinition] = {
         monthly_price_usd=0.0,
         monthly_request_limit=50,
         max_calendars=1,
-        model_access=["gpt-4o-mini", "claude-haiku-3-20250414"],
-        features=["basic_crud", "list_events", "single_calendar"],
+        allows_primary_model=False,
+        features=_FREE_FEATURES.split(),
     ),
     PlanTier.PRO: PlanDefinition(
         tier=PlanTier.PRO,
@@ -51,20 +58,8 @@ PLANS: dict[PlanTier, PlanDefinition] = {
         monthly_price_usd=9.99,
         monthly_request_limit=500,
         max_calendars=5,
-        model_access=[
-            "gpt-4o-mini",
-            "gpt-4o",
-            "claude-haiku-3-20250414",
-            "claude-sonnet-4-20250514",
-        ],
-        features=[
-            "basic_crud",
-            "list_events",
-            "smart_scheduling",
-            "conflict_detection",
-            "multi_calendar",
-            "free_slot_finder",
-        ],
+        allows_primary_model=True,
+        features=_PRO_FEATURES.split(),
     ),
     PlanTier.BUSINESS: PlanDefinition(
         tier=PlanTier.BUSINESS,
@@ -72,24 +67,8 @@ PLANS: dict[PlanTier, PlanDefinition] = {
         monthly_price_usd=29.99,
         monthly_request_limit=2000,
         max_calendars=20,
-        model_access=[
-            "gpt-4o-mini",
-            "gpt-4o",
-            "claude-haiku-3-20250414",
-            "claude-sonnet-4-20250514",
-        ],
-        features=[
-            "basic_crud",
-            "list_events",
-            "smart_scheduling",
-            "conflict_detection",
-            "multi_calendar",
-            "free_slot_finder",
-            "team_calendars",
-            "api_access",
-            "priority_routing",
-            "webhook_notifications",
-        ],
+        allows_primary_model=True,
+        features=_BUSINESS_FEATURES.split(),
     ),
     PlanTier.ENTERPRISE: PlanDefinition(
         tier=PlanTier.ENTERPRISE,
@@ -97,13 +76,8 @@ PLANS: dict[PlanTier, PlanDefinition] = {
         monthly_price_usd=0.0,  # Custom pricing
         monthly_request_limit=100_000,
         max_calendars=999,
-        model_access=[
-            "gpt-4o-mini",
-            "gpt-4o",
-            "claude-haiku-3-20250414",
-            "claude-sonnet-4-20250514",
-        ],
-        features=["all"],
+        allows_primary_model=True,
+        features=_ENTERPRISE_FEATURES.split(),
     ),
 }
 

@@ -30,7 +30,7 @@ class CreateEventDTO(BaseModel):
 class UpdateEventDTO(BaseModel):
     """Input for updating a calendar event."""
 
-    event_id: str
+    event_id: str | None = None
     title: str | None = None
     description: str | None = None
     location: str | None = None

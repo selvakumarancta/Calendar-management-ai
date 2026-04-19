@@ -251,8 +251,14 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
             for e in self._events.values()
             if e.user_id == user_id
             and e.status != EventStatus.CANCELLED
-            and (e.start_time.replace(tzinfo=None) if e.start_time.tzinfo else e.start_time) < end_cmp
-            and (e.end_time.replace(tzinfo=None) if e.end_time.tzinfo else e.end_time) > start_cmp
+            and (
+                e.start_time.replace(tzinfo=None)
+                if e.start_time.tzinfo
+                else e.start_time
+            )
+            < end_cmp
+            and (e.end_time.replace(tzinfo=None) if e.end_time.tzinfo else e.end_time)
+            > start_cmp
         ]
         results.sort(key=lambda e: e.start_time)
         return results[:max_results]

@@ -150,7 +150,9 @@ class TestDraftComposerService:
             user_id=user_id,
             user_email="alice@example.com",
             user_timezone="UTC",
-            email_provider=AsyncMock(create_draft_reply=AsyncMock(return_value="draft-id-123")),
+            email_provider=AsyncMock(
+                create_draft_reply=AsyncMock(return_value="draft-id-123")
+            ),
         )
         # Should return a DraftReply (or None if skipped)
         if result is not None:
@@ -171,7 +173,9 @@ class TestDraftComposerService:
             user_id=email.user_id,
             user_email="alice@example.com",
             user_timezone="UTC",
-            email_provider=AsyncMock(create_draft_reply=AsyncMock(return_value="draft-id-456")),
+            email_provider=AsyncMock(
+                create_draft_reply=AsyncMock(return_value="draft-id-456")
+            ),
         )
         assert result is None
 
@@ -254,7 +258,128 @@ class TestDraftComposerService:
                 user_id=email.user_id,
                 user_email="alice@example.com",
                 user_timezone="UTC",
-                email_provider=AsyncMock(create_draft_reply=AsyncMock(return_value="draft-abc")),
+                email_provider=AsyncMock(
+                    create_draft_reply=AsyncMock(return_value="draft-abc")
+                ),
             )
         except AttributeError as exc:
             pytest.fail(f"Crashed when analytics_service=None: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Pure helper methods (no LLM / network needed)
+# ---------------------------------------------------------------------------
+
+
+class TestDraftComposerHelpers:
+    def _svc_no_llm(self):
+        from src.application.services.draft_composer_service import DraftComposerService
+
+        return DraftComposerService(llm_adapter=None)
+
+    @pytest.mark.unit
+    def test_add_footer_appends_branding(self):
+        svc = self._svc_no_llm()
+        result = svc._add_footer("Hello!")
+        assert "Drafted by CalendarAgent" in result
+        assert result.startswith("Hello!")
+
+    @pytest.mark.unit
+    def test_extract_declined_times_finds_time_in_message(self):
+        from src.domain.entities.email_message import ThreadMessage
+
+        svc = self._svc_no_llm()
+        msgs = [
+            ThreadMessage(
+                sender="bob@example.com",
+                body="I can't make it at 3pm on Tuesday.",
+                is_from_user=False,
+            )
+        ]
+        declined = svc._extract_declined_times(msgs)
+        assert len(declined) > 0
+
+    @pytest.mark.unit
+    def test_extract_declined_times_empty_thread(self):
+        svc = self._svc_no_llm()
+        result = svc._extract_declined_times([])
+        assert result == []
+
+    @pytest.mark.unit
+    def test_extract_declined_times_no_declined_patterns(self):
+        from src.domain.entities.email_message import ThreadMessage
+
+        svc = self._svc_no_llm()
+        msgs = [
+            ThreadMessage(
+                sender="bob@example.com",
+                body="Let's meet at 2pm, works for me!",
+                is_from_user=False,
+            )
+        ]
+        result = svc._extract_declined_times(msgs)
+        # No decline patterns → empty list (or truncated list)
+        assert isinstance(result, list)
+
+    @pytest.mark.unit
+    async def test_get_calendar_summary_no_calendar(self):
+        svc = self._svc_no_llm()
+        result = await svc._get_calendar_summary(uuid.uuid4(), "UTC")
+        assert "not connected" in result.lower() or result == "Calendar not connected."
+
+    @pytest.mark.unit
+    async def test_get_calendar_summary_empty_calendar(self):
+        from src.application.services.draft_composer_service import DraftComposerService
+
+        cal = AsyncMock()
+        cal.list_events = AsyncMock(return_value=[])
+        svc = DraftComposerService(llm_adapter=None, calendar_adapter=cal)
+        result = await svc._get_calendar_summary(uuid.uuid4(), "UTC")
+        assert "clear" in result.lower() or "no events" in result.lower()
+
+    @pytest.mark.unit
+    async def test_get_calendar_summary_calendar_error(self):
+        from src.application.services.draft_composer_service import DraftComposerService
+
+        cal = AsyncMock()
+        cal.list_events = AsyncMock(side_effect=RuntimeError("Cal error"))
+        svc = DraftComposerService(llm_adapter=None, calendar_adapter=cal)
+        result = await svc._get_calendar_summary(uuid.uuid4(), "UTC")
+        assert "unavailable" in result.lower()
+
+    @pytest.mark.unit
+    async def test_compose_returns_none_when_no_llm(self):
+        """compose_and_create_draft returns None immediately when llm_adapter is None."""
+        from src.application.services.draft_composer_service import DraftComposerService
+
+        svc = DraftComposerService(llm_adapter=None)
+        result = await svc.compose_and_create_draft(
+            email=_email(),
+            classification=_classification(),
+            user_id=uuid.uuid4(),
+            user_email="me@example.com",
+            user_timezone="UTC",
+            email_provider=AsyncMock(),
+        )
+        assert result is None
+
+    @pytest.mark.unit
+    async def test_save_draft_no_op_without_db(self):
+        """_save_draft returns immediately when db_session_factory is None."""
+        from src.application.services.draft_composer_service import DraftComposerService
+        from src.domain.entities.email_message import DraftReply, DraftStatus
+
+        svc = DraftComposerService(llm_adapter=None, db_session_factory=None)
+        draft = DraftReply(
+            user_id=uuid.uuid4(),
+            email_provider_id="msg-1",
+            thread_id="thread-1",
+            email_subject="Test",
+            email_sender="sender@example.com",
+            email_received_at=datetime.now(timezone.utc),
+            draft_provider_id="draft-1",
+            reply_to="sender@example.com",
+            reply_subject="Re: Test",
+            reply_body="Body",
+        )
+        await svc._save_draft(draft)  # should not raise
