@@ -230,8 +230,14 @@ async def whatsapp_replay(
     results = []
 
     for i, item in enumerate(messages_input):
-        text = item.get("text", "").strip() if isinstance(item, dict) else str(item).strip()
-        from_phone = item.get("from", default_phone) if isinstance(item, dict) else default_phone
+        text = (
+            item.get("text", "").strip()
+            if isinstance(item, dict)
+            else str(item).strip()
+        )
+        from_phone = (
+            item.get("from", default_phone) if isinstance(item, dict) else default_phone
+        )
 
         if not text:
             continue
@@ -261,7 +267,10 @@ async def whatsapp_replay(
         )
         logger.info(
             "Replay msg[%d] '%s…' → has_meeting=%s event_created=%s",
-            i, text[:50], result.has_meeting, result.event_created,
+            i,
+            text[:50],
+            result.has_meeting,
+            result.event_created,
         )
 
     created = sum(1 for r in results if r["event_created"])

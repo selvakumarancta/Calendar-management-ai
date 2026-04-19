@@ -114,7 +114,12 @@ class MessageHookService:
 
         should_create = (
             auto_create
-            and confidence >= (self._auto_threshold if source != "whatsapp" else min(self._auto_threshold, 0.75))
+            and confidence
+            >= (
+                self._auto_threshold
+                if source != "whatsapp"
+                else min(self._auto_threshold, 0.75)
+            )
             and extraction.get("proposed_start")
         )
 
@@ -190,8 +195,13 @@ class MessageHookService:
             return {"action": "suggested", "reason": "Calendar adapter not available"}
 
         if user_id is None:
-            logger.error("_create_event_from_extraction called with user_id=None; skipping")
-            return {"action": "error", "reason": "No authenticated user — cannot create event"}
+            logger.error(
+                "_create_event_from_extraction called with user_id=None; skipping"
+            )
+            return {
+                "action": "error",
+                "reason": "No authenticated user — cannot create event",
+            }
 
         try:
             from datetime import timedelta
@@ -222,7 +232,10 @@ class MessageHookService:
             # Use CalendarService (which converts DTO → domain entity) if available,
             # otherwise fall back to calling the provider adapter directly via entity
             if not hasattr(self._calendar, "create_event"):
-                return {"action": "suggested", "reason": "Calendar adapter has no create_event method"}
+                return {
+                    "action": "suggested",
+                    "reason": "Calendar adapter has no create_event method",
+                }
 
             from src.domain.entities.calendar_event import (
                 Attendee,
@@ -252,7 +265,8 @@ class MessageHookService:
             )
             return {
                 "action": "created",
-                "event_id": getattr(event, "id", ""),
+                "event_id": str(getattr(event, "id", "")).replace("-", ""),
+                "google_event_id": getattr(event, "provider_event_id", None),
                 "title": dto.title,
                 "start": dto.start_time.isoformat(),
                 "end": dto.end_time.isoformat(),

@@ -67,7 +67,7 @@ class WhatsAppIntelligenceService:
         Falls back to UTC if unknown.
         """
         _COUNTRY_TZ = {
-            "91": "Asia/Kolkata",   # India (+91)
+            "91": "Asia/Kolkata",  # India (+91)
             "1": "America/New_York",  # US/Canada (+1)
             "44": "Europe/London",  # UK (+44)
             "61": "Australia/Sydney",  # Australia (+61)
@@ -257,7 +257,11 @@ class WhatsAppIntelligenceService:
             hook_result = await self._hook.process_message(
                 user_id=user_id,
                 message_text=msg.text,
-                sender=f"+{msg.from_phone}" if not msg.from_phone.startswith("+") else msg.from_phone,
+                sender=(
+                    f"+{msg.from_phone}"
+                    if not msg.from_phone.startswith("+")
+                    else msg.from_phone
+                ),
                 source="whatsapp",
                 user_timezone=effective_tz,
                 auto_create=True,
@@ -290,7 +294,7 @@ class WhatsAppIntelligenceService:
                 result.google_event_id = (
                     getattr(created_event, "provider_event_id", None)
                     if created_event
-                    else hook_result.get("event_id")
+                    else hook_result.get("google_event_id")
                 )
                 logger.info(
                     "WhatsApp msg %s → created event '%s' (google_id=%s)",
@@ -310,22 +314,32 @@ class WhatsAppIntelligenceService:
                 if result.event_created and self._db:
                     from sqlalchemy import text as _text
 
-                    sender_tag = f"\n\n📱 From WhatsApp: +{msg.from_phone}" if not msg.from_phone.startswith("+") else f"\n\n📱 From WhatsApp: {msg.from_phone}"
-                    async with self._db() as session:
-                        await session.execute(
-                            _text(
-                                "UPDATE calendar_events "
-                                "SET description = COALESCE(description,'') || :tag "
-                                "WHERE provider_event_id = :pid AND source = 'whatsapp' "
-                                "AND description NOT LIKE :pattern"
-                            ),
-                            {
-                                "tag": sender_tag,
-                                "pid": result.google_event_id or "",
-                                "pattern": "%From WhatsApp%",
-                            },
-                        )
-                        await session.commit()
+                    sender_tag = (
+                        f"\n\n📱 From WhatsApp: +{msg.from_phone}"
+                        if not msg.from_phone.startswith("+")
+                        else f"\n\n📱 From WhatsApp: {msg.from_phone}"
+                    )
+                    # Match on internal id (CHAR(32) without dashes) from hook_result
+                    db_event_id = (
+                        hook_result.get("event_id")
+                        or str(getattr(created_event, "id", "")).replace("-", "")
+                    )
+                    if db_event_id:
+                        async with self._db() as session:
+                            await session.execute(
+                                _text(
+                                    "UPDATE calendar_events "
+                                    "SET description = COALESCE(description,'') || :tag "
+                                    "WHERE id = :eid AND source = 'whatsapp' "
+                                    "AND description NOT LIKE :pattern"
+                                ),
+                                {
+                                    "tag": sender_tag,
+                                    "eid": db_event_id,
+                                    "pattern": "%From WhatsApp%",
+                                },
+                            )
+                            await session.commit()
             except Exception:
                 pass  # non-fatal
 
