@@ -1661,9 +1661,9 @@ async function approveSuggestion(id, proposedStart) {
 }
 
 function showApproveTimePicker(id, card, btns) {
-  // Remove any existing picker for this card
-  const existing = card.querySelector(".approve-time-picker");
-  if (existing) { existing.remove(); return; }
+  // Remove any existing modal
+  const existing = document.getElementById("approve-time-modal");
+  if (existing) existing.remove();
 
   // Default to tomorrow at 10:00
   const tomorrow = new Date();
@@ -1672,32 +1672,74 @@ function showApproveTimePicker(id, card, btns) {
   const pad = n => String(n).padStart(2, "0");
   const defaultVal = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth()+1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
 
-  const picker = document.createElement("div");
-  picker.className = "approve-time-picker";
-  picker.style.cssText = "margin-top:10px;padding:10px;background:var(--bg2,#f5f5f5);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center";
-  picker.innerHTML = `
-    <label style="font-size:0.85rem;color:var(--text2)">📅 When should this be scheduled?</label>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <input type="datetime-local" id="pick-start-${id}" value="${defaultVal}" style="padding:4px 8px;border:1px solid var(--border,#ddd);border-radius:6px;font-size:0.85rem">
-      <select id="pick-dur-${id}" style="padding:4px 8px;border:1px solid var(--border,#ddd);border-radius:6px;font-size:0.85rem">
-        <option value="30">30 min</option>
-        <option value="60" selected>1 hour</option>
-        <option value="90">1.5 hours</option>
-        <option value="120">2 hours</option>
-      </select>
-      <button class="btn btn-primary btn-sm" onclick="_confirmApproveWithTime('${id}')">✅ Schedule</button>
-      <button class="btn btn-ghost btn-sm" onclick="this.closest('.approve-time-picker').remove()">Cancel</button>
+  // Get suggestion title for context
+  const titleEl = card.querySelector(".suggestion-title");
+  const titleText = titleEl ? titleEl.textContent.trim() : "this event";
+
+  const modal = document.createElement("div");
+  modal.id = "approve-time-modal";
+  modal.style.cssText = `
+    position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,0.45);backdrop-filter:blur(2px);
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--bg,#fff);border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,0.18);
+                padding:28px 32px;max-width:440px;width:90%;position:relative;">
+      <button onclick="document.getElementById('approve-time-modal').remove()"
+              style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:1.3rem;
+                     cursor:pointer;color:var(--text2,#666);line-height:1;" title="Close">✕</button>
+      <div style="font-size:1.5rem;margin-bottom:6px;">📅</div>
+      <h3 style="margin:0 0 4px;font-size:1.05rem;color:var(--text,#111)">Schedule Event</h3>
+      <p style="margin:0 0 20px;font-size:0.85rem;color:var(--text2,#666);line-height:1.4">
+        No time was found in the email for <strong>${esc(titleText)}</strong>.<br>Pick when to create this event.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text2,#555);display:block;margin-bottom:4px">
+            Date &amp; Time
+          </label>
+          <input type="datetime-local" id="modal-pick-start-${id}" value="${defaultVal}"
+                 style="width:100%;padding:8px 12px;border:1.5px solid var(--border,#ddd);border-radius:8px;
+                        font-size:0.95rem;box-sizing:border-box;outline:none;">
+        </div>
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text2,#555);display:block;margin-bottom:4px">
+            Duration
+          </label>
+          <select id="modal-pick-dur-${id}"
+                  style="width:100%;padding:8px 12px;border:1.5px solid var(--border,#ddd);border-radius:8px;
+                         font-size:0.95rem;box-sizing:border-box;background:var(--bg,#fff);cursor:pointer;">
+            <option value="30">30 minutes</option>
+            <option value="60" selected>1 hour</option>
+            <option value="90">1 hour 30 minutes</option>
+            <option value="120">2 hours</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:22px;">
+        <button class="btn btn-primary" style="flex:1;padding:10px"
+                onclick="_confirmApproveWithTime('${id}')">✅ Create Event</button>
+        <button class="btn btn-ghost" style="flex:0 0 auto;padding:10px 16px"
+                onclick="document.getElementById('approve-time-modal').remove()">Cancel</button>
+      </div>
     </div>`;
 
-  const actionsDiv = card.querySelector(".suggestion-actions");
-  actionsDiv.after(picker);
+  // Close on backdrop click
+  modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+  // Close on Escape
+  const onKey = e => { if (e.key === "Escape") { modal.remove(); document.removeEventListener("keydown", onKey); } };
+  document.addEventListener("keydown", onKey);
+
+  document.body.appendChild(modal);
+  // Focus the datetime input
+  setTimeout(() => document.getElementById(`modal-pick-start-${id}`)?.focus(), 50);
 }
 
 async function _confirmApproveWithTime(id) {
   const card = document.querySelector(`[data-suggestion-id="${id}"]`);
-  const btns = card.querySelectorAll("button");
-  const startInput = document.getElementById(`pick-start-${id}`);
-  const durSelect = document.getElementById(`pick-dur-${id}`);
+  const btns = card ? card.querySelectorAll("button") : [];
+  const startInput = document.getElementById(`modal-pick-start-${id}`);
+  const durSelect = document.getElementById(`modal-pick-dur-${id}`);
 
   if (!startInput || !startInput.value) {
     showToast("Please pick a date and time.", "error");
@@ -1707,6 +1749,9 @@ async function _confirmApproveWithTime(id) {
   const startDt = new Date(startInput.value);
   const durMin = parseInt(durSelect.value, 10) || 60;
   const endDt = new Date(startDt.getTime() + durMin * 60000);
+
+  // Close modal
+  document.getElementById("approve-time-modal")?.remove();
 
   btns.forEach(b => b.disabled = true);
   await _doApprove(id, startDt.toISOString(), endDt.toISOString(), card, btns);
@@ -1719,9 +1764,8 @@ async function _doApprove(id, startTime, endTime, card, btns) {
     const result = await api("POST", `/api/v1/email/suggestions/${id}/approve`, body);
     const actionsDiv = card.querySelector(".suggestion-actions");
     actionsDiv.innerHTML = `<div class="suggestion-status-badge status-approved">✅ Event Created: ${esc(result.title)}</div>`;
-    // Remove time picker if still present
-    const picker = card.querySelector(".approve-time-picker");
-    if (picker) picker.remove();
+    // Ensure modal is closed (in case _doApprove was called from somewhere else)
+    document.getElementById("approve-time-modal")?.remove();
     await loadEmailSuggestions();
     showToast("Event created! Switching to Calendar…");
 
