@@ -969,8 +969,14 @@ class EmailIntelligenceService:
         self,
         suggestion_id: uuid.UUID,
         user_id: uuid.UUID,
+        override_start: "datetime | None" = None,
+        override_end: "datetime | None" = None,
     ) -> ScheduleSuggestion | None:
-        """Approve a suggestion and create a calendar event."""
+        """Approve a suggestion and create a calendar event.
+
+        ``override_start`` / ``override_end`` are used when the suggestion
+        has no extracted time (proposed_start / proposed_end are None).
+        """
         if not self._db_session_factory:
             return None
 
@@ -989,8 +995,12 @@ class EmailIntelligenceService:
             if not model:
                 return None
 
+            # Resolve start/end: prefer the stored times, fall back to overrides
+            start = model.proposed_start or override_start
+            end = model.proposed_end or override_end
+
             # Create calendar event
-            if self._calendar and model.proposed_start and model.proposed_end:
+            if self._calendar and start and end:
                 from src.domain.entities.calendar_event import Attendee, CalendarEvent
 
                 event = CalendarEvent(
@@ -998,8 +1008,8 @@ class EmailIntelligenceService:
                     title=model.title,
                     description=model.description,
                     location=model.location,
-                    start_time=model.proposed_start,
-                    end_time=model.proposed_end,
+                    start_time=start,
+                    end_time=end,
                     attendees=[
                         Attendee(email=a) for a in json.loads(model.attendees_json)
                     ],
@@ -1007,6 +1017,11 @@ class EmailIntelligenceService:
                 try:
                     created = await self._calendar.create_event(user_id, event)
                     model.calendar_event_id = created.provider_event_id
+                    # Persist the resolved times back to the suggestion row
+                    if not model.proposed_start:
+                        model.proposed_start = start
+                    if not model.proposed_end:
+                        model.proposed_end = end
                 except Exception as e:
                     logger.warning("Failed to create calendar event: %s", e)
 

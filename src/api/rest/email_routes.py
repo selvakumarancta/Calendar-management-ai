@@ -203,16 +203,54 @@ async def get_suggestions(
     ]
 
 
+class ApproveRequest(BaseModel):
+    """Optional time overrides when the suggestion has no extracted start/end time."""
+
+    start_time: str | None = Field(
+        default=None, description="ISO8601 override start time (required if suggestion has no time)"
+    )
+    end_time: str | None = Field(
+        default=None, description="ISO8601 override end time"
+    )
+
+
 @email_router.post("/suggestions/{suggestion_id}/approve")
 async def approve_suggestion(
     suggestion_id: UUID,
+    body: ApproveRequest = ApproveRequest(),
     current_user: User = Depends(get_current_user),
     container: Container = Depends(get_container),
 ) -> dict:
-    """Approve a suggestion and create a calendar event."""
+    """Approve a suggestion and create a calendar event.
+
+    When the suggestion has no extracted time, pass ``start_time`` (ISO8601)
+    in the request body; ``end_time`` defaults to ``start_time + 1 hour``.
+    """
+    from datetime import datetime, timedelta, timezone
+
     from src.application.services.email_intelligence_service import (
         EmailIntelligenceService,
     )
+
+    # Parse optional override times
+    override_start: datetime | None = None
+    override_end: datetime | None = None
+    if body.start_time:
+        try:
+            override_start = datetime.fromisoformat(body.start_time)
+            if override_start.tzinfo is None:
+                override_start = override_start.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid start_time format; use ISO8601")
+        if body.end_time:
+            try:
+                override_end = datetime.fromisoformat(body.end_time)
+                if override_end.tzinfo is None:
+                    override_end = override_end.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid end_time format; use ISO8601")
+        else:
+            override_end = override_start + timedelta(hours=1)
 
     db = container.database()
     service = EmailIntelligenceService(
@@ -220,7 +258,11 @@ async def approve_suggestion(
         db_session_factory=db.session_factory,
     )
 
-    result = await service.approve_suggestion(suggestion_id, current_user.id)
+    result = await service.approve_suggestion(
+        suggestion_id, current_user.id,
+        override_start=override_start,
+        override_end=override_end,
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Suggestion not found")
 
@@ -233,6 +275,7 @@ async def approve_suggestion(
         "status": "approved",
         "title": result.title,
         "calendar_event_id": result.calendar_event_id,
+        "event_created": bool(result.calendar_event_id),
         "proposed_start": (
             result.proposed_start.isoformat() if result.proposed_start else None
         ),

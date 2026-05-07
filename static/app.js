@@ -763,14 +763,8 @@ async function checkGoogleCalendarScope() {
 }
 
 async function reconnectGoogleCalendar() {
-  try {
-    const res = await api("GET", "/api/v1/auth/google/reconnect");
-    if (res.authorization_url) {
-      window.location.href = res.authorization_url;
-    }
-  } catch (e) {
-    showToast("Failed to start Google reconnect: " + e.message, "error");
-  }
+  // Navigate directly — the endpoint now issues a 302 redirect to Google
+  window.location.href = "/api/v1/auth/google/reconnect";
 }
 
 function filterEvents(query) {
@@ -1567,9 +1561,11 @@ function renderSuggestionCard(s, tab) {
 
   let actions = "";
   if (tab === "pending") {
+    // Store proposed_start in data attribute so approveSuggestion can read it
+    const hasTime = !!s.proposed_start;
     actions = `
       <div class="suggestion-actions">
-        <button class="btn btn-primary btn-sm" onclick="approveSuggestion('${s.id}')">✅ Approve & Create</button>
+        <button class="btn btn-primary btn-sm" onclick="approveSuggestion('${s.id}', ${hasTime ? `'${s.proposed_start}'` : 'null'})">✅ Approve & Create</button>
         <button class="btn btn-ghost btn-sm" onclick="rejectSuggestion('${s.id}')">Dismiss</button>
       </div>`;
   } else if (tab === "approved") {
@@ -1579,7 +1575,7 @@ function renderSuggestionCard(s, tab) {
   }
 
   return `
-    <div class="suggestion-card">
+    <div class="suggestion-card" data-suggestion-id="${s.id}">
       <div class="suggestion-card-header">
         <div class="suggestion-meta">
           <span class="suggestion-icon">${icon}</span>
@@ -1650,23 +1646,90 @@ async function triggerEmailScan() {
   setTimeout(() => { statusBar.style.display = "none"; }, 10000);
 }
 
-async function approveSuggestion(id) {
+async function approveSuggestion(id, proposedStart) {
   const card = event.target.closest(".suggestion-card");
   const btns = card.querySelectorAll("button");
-  btns.forEach(b => b.disabled = true);
 
+  // If the suggestion has no extracted time, ask the user to pick one first
+  if (!proposedStart) {
+    showApproveTimePicker(id, card, btns);
+    return;
+  }
+
+  btns.forEach(b => b.disabled = true);
+  await _doApprove(id, null, null, card, btns);
+}
+
+function showApproveTimePicker(id, card, btns) {
+  // Remove any existing picker for this card
+  const existing = card.querySelector(".approve-time-picker");
+  if (existing) { existing.remove(); return; }
+
+  // Default to tomorrow at 10:00
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(10, 0, 0, 0);
+  const pad = n => String(n).padStart(2, "0");
+  const defaultVal = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth()+1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+
+  const picker = document.createElement("div");
+  picker.className = "approve-time-picker";
+  picker.style.cssText = "margin-top:10px;padding:10px;background:var(--bg2,#f5f5f5);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center";
+  picker.innerHTML = `
+    <label style="font-size:0.85rem;color:var(--text2)">📅 When should this be scheduled?</label>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input type="datetime-local" id="pick-start-${id}" value="${defaultVal}" style="padding:4px 8px;border:1px solid var(--border,#ddd);border-radius:6px;font-size:0.85rem">
+      <select id="pick-dur-${id}" style="padding:4px 8px;border:1px solid var(--border,#ddd);border-radius:6px;font-size:0.85rem">
+        <option value="30">30 min</option>
+        <option value="60" selected>1 hour</option>
+        <option value="90">1.5 hours</option>
+        <option value="120">2 hours</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="_confirmApproveWithTime('${id}')">✅ Schedule</button>
+      <button class="btn btn-ghost btn-sm" onclick="this.closest('.approve-time-picker').remove()">Cancel</button>
+    </div>`;
+
+  const actionsDiv = card.querySelector(".suggestion-actions");
+  actionsDiv.after(picker);
+}
+
+async function _confirmApproveWithTime(id) {
+  const card = document.querySelector(`[data-suggestion-id="${id}"]`);
+  const btns = card.querySelectorAll("button");
+  const startInput = document.getElementById(`pick-start-${id}`);
+  const durSelect = document.getElementById(`pick-dur-${id}`);
+
+  if (!startInput || !startInput.value) {
+    showToast("Please pick a date and time.", "error");
+    return;
+  }
+
+  const startDt = new Date(startInput.value);
+  const durMin = parseInt(durSelect.value, 10) || 60;
+  const endDt = new Date(startDt.getTime() + durMin * 60000);
+
+  btns.forEach(b => b.disabled = true);
+  await _doApprove(id, startDt.toISOString(), endDt.toISOString(), card, btns);
+}
+
+async function _doApprove(id, startTime, endTime, card, btns) {
   try {
-    const result = await api("POST", `/api/v1/email/suggestions/${id}/approve`);
+    const body = {};
+    if (startTime) { body.start_time = startTime; body.end_time = endTime; }
+    const result = await api("POST", `/api/v1/email/suggestions/${id}/approve`, body);
     const actionsDiv = card.querySelector(".suggestion-actions");
     actionsDiv.innerHTML = `<div class="suggestion-status-badge status-approved">✅ Event Created: ${esc(result.title)}</div>`;
+    // Remove time picker if still present
+    const picker = card.querySelector(".approve-time-picker");
+    if (picker) picker.remove();
     await loadEmailSuggestions();
     showToast("Event created! Switching to Calendar…");
 
     // Navigate to Calendar tab and jump to the week containing the new event
-    if (result.proposed_start) {
-      const eventDate = new Date(result.proposed_start);
+    const eventStart = startTime || result.proposed_start;
+    if (eventStart) {
+      const eventDate = new Date(eventStart);
       const now = new Date();
-      // Calculate weekOffset: how many weeks from current week to event's week
       const msPerWeek = 7 * 24 * 60 * 60 * 1000;
       const currentWeekStart = new Date(now);
       currentWeekStart.setDate(now.getDate() - now.getDay());
