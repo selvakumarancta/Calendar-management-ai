@@ -250,7 +250,12 @@ class GmailEmailAdapter(EmailProviderPort):
                     '"are you free" OR "are you available" OR "hop on" OR '
                     '"catch up" OR "catch-up" OR "quick call" OR "quick chat" OR '
                     '"set up a call" OR "set up a meeting" OR "book a time" OR '
-                    '"pick a time" OR "find a time" OR "block some time"'
+                    '"pick a time" OR "find a time" OR "block some time" OR '
+                    '"tomorrow" OR "next week" OR "this week" OR "available" OR '
+                    '"regarding meeting" OR "regarding call" OR "regarding discussion" OR '
+                    '"join us" OR "join the" OR "zoom" OR "google meet" OR "teams" OR '
+                    '"discuss" OR "discussion" OR "call with" OR "meeting with" OR '
+                    '"talk" OR "connect" OR "request" OR "proposal"'
                     ")"
                     " OR from:calendar-notification@google.com"
                     " OR from:noreply@google.com"

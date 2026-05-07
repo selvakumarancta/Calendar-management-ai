@@ -296,16 +296,17 @@ async def google_calendar_scope_check(
 @auth_router.get("/google/reconnect")
 async def google_reconnect(
     container: Container = Depends(get_container),
-) -> dict[str, str]:
+) -> object:
     """Force re-authorization of Google with all required scopes (calendar + gmail).
 
-    Use this when the existing token is missing the calendar scope.
-    The OAuth consent screen will be shown again with prompt=consent.
+    Redirects directly to the Google consent screen so the user doesn't see
+    raw JSON when visiting the URL in the browser.
     """
+    from fastapi.responses import RedirectResponse
+
     oauth = container.google_oauth()
-    # Same as login but state signals this is a reconnect
     url = oauth.get_authorization_url(state="reconnect")
-    return {"authorization_url": url}
+    return RedirectResponse(url=url, status_code=302)
 
 
 @auth_router.get("/google/callback")
@@ -1316,6 +1317,66 @@ async def export_event_ics(
         media_type="text/calendar; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@calendar_router.post(
+    "/events/sync-local-to-google",
+    summary="Push locally-stored (mem-) events to Google Calendar",
+)
+async def sync_local_events_to_google(
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Find calendar events stored only locally (provider_event_id starts with 'mem-')
+    and re-create them in Google Calendar. Returns counts of synced and failed events."""
+    from sqlalchemy import select
+
+    from src.infrastructure.persistence.calendar_event_model import CalendarEventModel
+
+    db = container.database()
+    cal_adapter = container.calendar_adapter()
+
+    synced, failed, skipped = 0, 0, 0
+    async with db.session_factory() as session:
+        result = await session.execute(
+            select(CalendarEventModel).where(
+                CalendarEventModel.user_id == current_user.id,
+                CalendarEventModel.provider_event_id.like("mem-%"),
+            )
+        )
+        local_events = result.scalars().all()
+
+    for ev_model in local_events:
+        try:
+            from src.domain.entities.calendar_event import CalendarEvent
+
+            event = CalendarEvent(
+                user_id=current_user.id,
+                title=ev_model.title,
+                description=ev_model.description,
+                location=ev_model.location,
+                start_time=ev_model.start_time,
+                end_time=ev_model.end_time,
+            )
+            created = await cal_adapter.create_event(current_user.id, event)
+            if created.provider_event_id and not created.provider_event_id.startswith("mem-"):
+                # Update old mem- row with the new Google Calendar ID
+                async with db.session_factory() as session:
+                    old = await session.get(CalendarEventModel, ev_model.id)
+                    if old:
+                        old.provider_event_id = created.provider_event_id
+                        await session.commit()
+                synced += 1
+            else:
+                failed += 1
+        except Exception as e:
+            failed += 1
+            import logging
+            logging.getLogger(__name__).warning(
+                "sync_local_to_google failed for %s: %s", ev_model.title, e
+            )
+
+    return {"local_events_found": len(local_events), "synced": synced, "failed": failed}
 
 
 def _build_chat_service(

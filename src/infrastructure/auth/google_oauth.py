@@ -41,11 +41,8 @@ class GoogleOAuthService:
     def get_authorization_url(self, state: str | None = None) -> str:
         """Generate the Google OAuth consent URL.
 
-        PKCE is intentionally disabled (autogenerate_code_verifier=False) because:
-        - This is a confidential web-server client (has a client_secret)
-        - PKCE requires persisting the verifier between the redirect and callback,
-          which breaks across server restarts / reloads in dev
-        - PKCE is mandatory only for public (mobile/SPA) clients
+        When state='reconnect' we request a fresh grant with no scope merging
+        so stale read-only calendar scopes from previous logins cannot bleed in.
         """
         import os
 
@@ -58,12 +55,17 @@ class GoogleOAuthService:
             redirect_uri=self._redirect_uri,
             autogenerate_code_verifier=False,
         )
-        url, _ = flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent",
-            state=state,
-        )
+        url_kwargs: dict = {
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state,
+        }
+        # For reconnect: do NOT include_granted_scopes so we get a clean
+        # fresh grant rather than merging with any existing (possibly read-only)
+        # calendar scope from a previous connection.
+        if state != "reconnect":
+            url_kwargs["include_granted_scopes"] = "true"
+        url, _ = flow.authorization_url(**url_kwargs)
         return url
 
     def exchange_code(self, code: str, state: str | None = None) -> dict:

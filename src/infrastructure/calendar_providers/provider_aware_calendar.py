@@ -53,12 +53,15 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
     async def _get_google_tokens(self, user_id: UUID) -> dict | None:
         """Look up real Google tokens from provider_connections for this user.
 
-        If the stored access token is expired, refreshes it automatically and
-        persists the new token back to the database.
+        Refreshes the access token only when it is expired or about to expire
+        (within 5 minutes). Prefers the newest connection row. Persists the
+        refreshed token and updated expiry back to the database.
         """
         if not self._db_session_factory:
             return None
         try:
+            from datetime import timezone as _tz
+
             from sqlalchemy import select
 
             from src.infrastructure.persistence.org_models import (
@@ -72,13 +75,12 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                         ProviderConnectionModel.provider == "google",
                         ProviderConnectionModel.status == "active",
                         ProviderConnectionModel.access_token != "dev-token",
-                    )
+                    ).order_by(ProviderConnectionModel.created_at.desc())
                 )
                 all_rows = result.scalars().all()
 
                 # Prefer rows that explicitly list the calendar scope so that
-                # a Gmail-only login token doesn't shadow a full-scope
-                # org-level connection.  Fall back to all rows if none match.
+                # a Gmail-only login token doesn't shadow a full-scope connection.
                 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
                 rows_with_cal = [
                     r for r in all_rows
@@ -86,14 +88,14 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                 ]
                 rows = rows_with_cal if rows_with_cal else all_rows
 
+                from src.infrastructure.security.token_encryption import (
+                    decrypt_token,
+                    encrypt_token,
+                )
+
                 for row in rows:
                     if not row.access_token or row.access_token == "dev-token":
                         continue
-
-                    from src.infrastructure.security.token_encryption import (
-                        decrypt_token,
-                        encrypt_token,
-                    )
 
                     access = decrypt_token(row.access_token)
                     refresh = decrypt_token(row.refresh_token or "")
@@ -106,41 +108,58 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                         )
                         continue
 
-                    # Always refresh using the refresh_token because we don't store
-                    # token expiry — google.oauth2.credentials.Credentials.valid
-                    # returns True when no expiry is set even if the token is expired.
-                    if refresh and self._google_client_id:
+                    # Refresh only when expired or expiring within 5 minutes.
+                    # Also refresh when `token_expiry` is unknown (None) — legacy
+                    # rows that predate expiry storage may carry stale scope tokens.
+                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                    token_expiry = row.token_expiry  # naive UTC from DB
+                    needs_refresh = (
+                        refresh
+                        and self._google_client_id
+                        and (
+                            token_expiry is None
+                            or (token_expiry - now_utc).total_seconds() < 300
+                        )
+                    )
+
+                    if needs_refresh:
                         try:
                             import asyncio
 
                             from google.auth.transport.requests import Request
                             from google.oauth2.credentials import Credentials
 
+                            # Capture loop variables to avoid closure bug
+                            _access, _refresh = access, refresh
                             creds = Credentials(
-                                token=access,
-                                refresh_token=refresh,
+                                token=_access,
+                                refresh_token=_refresh,
                                 token_uri="https://oauth2.googleapis.com/token",
                                 client_id=self._google_client_id,
                                 client_secret=self._google_client_secret,
                             )
-                            # Unconditionally refresh — we never store expiry so
-                            # creds.valid is always True even for expired tokens.
+
+                            def _do_refresh(c: Credentials) -> None:
+                                c.refresh(Request())
+
                             await asyncio.get_event_loop().run_in_executor(
-                                None, lambda: creds.refresh(Request())
+                                None, _do_refresh, creds
                             )
                             if creds.token:
-                                # Persist refreshed token
                                 row.access_token = encrypt_token(creds.token)
                                 if creds.refresh_token:
                                     row.refresh_token = encrypt_token(
                                         creds.refresh_token
                                     )
+                                # Persist updated expiry so next call skips refresh
+                                if creds.expiry:
+                                    row.token_expiry = creds.expiry.replace(tzinfo=None)
                                 await session.commit()
                                 access = creds.token
                                 refresh = creds.refresh_token or refresh
                                 logger.info(
-                                    "Refreshed Google Calendar token for user %s",
-                                    user_id,
+                                    "Refreshed Google Calendar token for user %s (expires %s)",
+                                    user_id, creds.expiry,
                                 )
                         except Exception as ref_err:
                             logger.warning(
@@ -149,7 +168,7 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                                 user_id,
                                 ref_err,
                             )
-                            # Don't return an expired/invalid token; try next row
+                            # Don't return a potentially expired token; try next row
                             continue
 
                     return {
@@ -306,32 +325,44 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         event: CalendarEvent,
     ) -> CalendarEvent:
         tokens = await self._get_google_tokens(user_id)
-        if tokens:
-            try:
-                from src.infrastructure.calendar_providers.google_calendar import (
-                    GoogleCalendarAdapter,
-                )
+        if not tokens:
+            logger.warning(
+                "create_event: no valid Google tokens for user %s — storing locally only",
+                user_id,
+            )
+            return await self._in_memory.create_event(user_id, event)
+        try:
+            from src.infrastructure.calendar_providers.google_calendar import (
+                GoogleCalendarAdapter,
+            )
 
-                service = self._build_google_service(tokens)
-                body = GoogleCalendarAdapter._to_google_event(event)
-                result = (
-                    service.events()
-                    .insert(calendarId=event.calendar_id or "primary", body=body)
-                    .execute()
+            service = self._build_google_service(tokens)
+            body = GoogleCalendarAdapter._to_google_event(event)
+            result = (
+                service.events()
+                .insert(calendarId=event.calendar_id or "primary", body=body)
+                .execute()
+            )
+            event.provider_event_id = result["id"]
+            # Also persist to local DB so it's visible via list_events fallback
+            await self._in_memory.create_event(user_id, event)
+            logger.info(
+                "Google Calendar event created for user %s: %s (%s)",
+                user_id, result["id"], event.title,
+            )
+            return event
+        except Exception as e:
+            err_str = str(e)
+            if "insufficientPermissions" in err_str or "403" in err_str:
+                logger.warning(
+                    "Google Calendar create_event: insufficient scope for user %s — "
+                    "reconnect Google with Calendar permission. Error: %s", user_id, e
                 )
-                event.provider_event_id = result["id"]
-                # Also persist to local DB so it's visible via list_events fallback
-                await self._in_memory.create_event(user_id, event)
-                return event
-            except Exception as e:
-                err_str = str(e)
-                if "insufficientPermissions" in err_str or "403" in err_str:
-                    logger.warning(
-                        "Google Calendar create_event: insufficient scope for user %s — "
-                        "reconnect Google with Calendar permission. Error: %s", user_id, e
-                    )
-                else:
-                    logger.warning("Failed to create Google event, using in-memory: %s", e)
+            else:
+                logger.error(
+                    "Google Calendar create_event FAILED for user %s — "
+                    "title=%r error=%s", user_id, event.title, e
+                )
         return await self._in_memory.create_event(user_id, event)
 
     async def update_event(

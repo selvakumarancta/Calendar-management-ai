@@ -1129,13 +1129,35 @@ class EmailIntelligenceService:
         return [e for e in emails if e.provider_message_id not in already_processed]
 
     async def _save_suggestion(self, suggestion: ScheduleSuggestion) -> None:
-        """Persist a schedule suggestion to the DB."""
+        """Persist a schedule suggestion to the DB.
+
+        Skips creation if an existing pending/approved suggestion already exists
+        for the same email_provider_id to prevent duplicate suggestions when
+        the same email is scanned more than once.
+        """
         if not self._db_session_factory:
             return
+
+        from sqlalchemy import select
 
         from src.infrastructure.persistence.email_models import ScheduleSuggestionModel
 
         async with self._db_session_factory() as session:
+            # Deduplication: skip if a suggestion for the same email already exists
+            if suggestion.email_provider_id:
+                existing = await session.execute(
+                    select(ScheduleSuggestionModel.id).where(
+                        ScheduleSuggestionModel.user_id == suggestion.user_id,
+                        ScheduleSuggestionModel.email_provider_id == suggestion.email_provider_id,
+                    ).limit(1)
+                )
+                if existing.scalar_one_or_none():
+                    logger.debug(
+                        "Skipping duplicate suggestion for email_provider_id=%s",
+                        suggestion.email_provider_id,
+                    )
+                    return
+
             model = ScheduleSuggestionModel(
                 id=suggestion.id,
                 user_id=suggestion.user_id,
