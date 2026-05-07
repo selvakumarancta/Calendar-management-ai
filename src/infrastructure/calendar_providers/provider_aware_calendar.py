@@ -74,7 +74,18 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                         ProviderConnectionModel.access_token != "dev-token",
                     )
                 )
-                rows = result.scalars().all()
+                all_rows = result.scalars().all()
+
+                # Prefer rows that explicitly list the calendar scope so that
+                # a Gmail-only login token doesn't shadow a full-scope
+                # org-level connection.  Fall back to all rows if none match.
+                CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+                rows_with_cal = [
+                    r for r in all_rows
+                    if CALENDAR_SCOPE in (r.scopes or "")
+                ]
+                rows = rows_with_cal if rows_with_cal else all_rows
+
                 for row in rows:
                     if not row.access_token or row.access_token == "dev-token":
                         continue
@@ -188,9 +199,17 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     tokens, user_id, start, end, calendar_id, max_results
                 )
             except Exception as e:
-                logger.warning(
-                    "Google Calendar API failed, falling back to in-memory: %s", e
-                )
+                err_str = str(e)
+                if "insufficientPermissions" in err_str or "403" in err_str:
+                    logger.warning(
+                        "Google Calendar API: insufficient scope for user %s — "
+                        "user needs to reconnect Google with Calendar permission. "
+                        "Error: %s", user_id, e
+                    )
+                else:
+                    logger.warning(
+                        "Google Calendar API failed, falling back to in-memory: %s", e
+                    )
 
         # Always also fetch locally-created events (those created via the app)
         # so they're visible regardless of whether the Google API call succeeded.
@@ -305,7 +324,14 @@ class ProviderAwareCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                 await self._in_memory.create_event(user_id, event)
                 return event
             except Exception as e:
-                logger.warning("Failed to create Google event, using in-memory: %s", e)
+                err_str = str(e)
+                if "insufficientPermissions" in err_str or "403" in err_str:
+                    logger.warning(
+                        "Google Calendar create_event: insufficient scope for user %s — "
+                        "reconnect Google with Calendar permission. Error: %s", user_id, e
+                    )
+                else:
+                    logger.warning("Failed to create Google event, using in-memory: %s", e)
         return await self._in_memory.create_event(user_id, event)
 
     async def update_event(

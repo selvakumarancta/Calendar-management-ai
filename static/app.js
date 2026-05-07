@@ -725,12 +725,52 @@ async function loadEvents() {
   } catch (err) {
     list.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
   }
+
+  // Check if Google Calendar permission is missing and show reconnect banner
+  await checkGoogleCalendarScope();
 }
 
 function shiftWeek(delta) {
   weekOffset += delta;
   document.getElementById("ev-search").value = "";
   loadEvents();
+}
+
+async function checkGoogleCalendarScope() {
+  // Check if Google Calendar API is accessible. If we get  a 403 scope error,
+  // show a persistent reconnect banner so the user knows to re-authorise.
+  const bannerId = "google-scope-banner";
+  let banner = document.getElementById(bannerId);
+  try {
+    const res = await api("GET", "/api/v1/auth/google/calendar-scope-check");
+    const hasScope = res && res.calendar_scope_ok;
+    if (!hasScope) {
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.id = bannerId;
+        banner.style.cssText = "position:fixed;top:60px;left:0;right:0;z-index:9000;background:#f59e0b;color:#1c1917;padding:10px 16px;display:flex;align-items:center;gap:12px;font-size:13px;";
+        banner.innerHTML = `<span>⚠️ <strong>Google Calendar permission missing.</strong> Your connected account doesn't have calendar access — events from email won't sync.</span>
+          <button onclick="reconnectGoogleCalendar()" style="background:#1c1917;color:#fef3c7;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;">🔑 Reconnect Google</button>
+          <button onclick="document.getElementById('${bannerId}').remove()" style="background:transparent;border:none;cursor:pointer;font-size:16px;margin-left:auto;">✕</button>`;
+        document.body.appendChild(banner);
+      }
+    } else if (banner) {
+      banner.remove();
+    }
+  } catch (_) {
+    // Endpoint may not exist yet — silently ignore
+  }
+}
+
+async function reconnectGoogleCalendar() {
+  try {
+    const res = await api("GET", "/api/v1/auth/google/reconnect");
+    if (res.authorization_url) {
+      window.location.href = res.authorization_url;
+    }
+  } catch (e) {
+    showToast("Failed to start Google reconnect: " + e.message, "error");
+  }
 }
 
 function filterEvents(query) {

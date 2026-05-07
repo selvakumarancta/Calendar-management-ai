@@ -244,6 +244,70 @@ async def google_login(
     return {"authorization_url": url}
 
 
+@auth_router.get("/google/calendar-scope-check")
+async def google_calendar_scope_check(
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Check whether the user's Google token has the calendar scope.
+
+    Returns ``{"calendar_scope_ok": true}`` when the Calendar API is
+    accessible, ``{"calendar_scope_ok": false, "reason": "..."}`` otherwise.
+    The frontend uses this to show a reconnect banner when the scope is missing.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cal = container.calendar_adapter()
+    tokens = await cal._get_google_tokens(current_user.id)
+    if not tokens:
+        return {"calendar_scope_ok": False, "reason": "No Google tokens found. Connect Google account first."}
+
+    try:
+        from googleapiclient.discovery import build
+        from google.oauth2.credentials import Credentials
+
+        creds = Credentials(
+            token=tokens["access_token"],
+            refresh_token=tokens.get("refresh_token") or None,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=container.settings.google_client_id,
+            client_secret=container.settings.google_client_secret,
+        )
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        now = datetime.now(timezone.utc)
+        service.events().list(
+            calendarId="primary",
+            timeMin=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timeMax=(now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            maxResults=1,
+        ).execute()
+        return {"calendar_scope_ok": True}
+    except Exception as e:
+        err = str(e)
+        if "insufficientPermissions" in err or "403" in err:
+            return {
+                "calendar_scope_ok": False,
+                "reason": "Google Calendar permission not granted. Click Reconnect Google to re-authorise.",
+            }
+        # Other errors (network, service unavailable, etc.) — don't show false reconnect banner
+        return {"calendar_scope_ok": True}
+
+
+@auth_router.get("/google/reconnect")
+async def google_reconnect(
+    container: Container = Depends(get_container),
+) -> dict[str, str]:
+    """Force re-authorization of Google with all required scopes (calendar + gmail).
+
+    Use this when the existing token is missing the calendar scope.
+    The OAuth consent screen will be shown again with prompt=consent.
+    """
+    oauth = container.google_oauth()
+    # Same as login but state signals this is a reconnect
+    url = oauth.get_authorization_url(state="reconnect")
+    return {"authorization_url": url}
+
+
 @auth_router.get("/google/callback")
 async def google_callback(
     code: str,
