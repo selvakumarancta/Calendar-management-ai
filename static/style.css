@@ -1259,6 +1259,8 @@ html,body {
 .suggestion-status-badge { padding: .5rem 1rem; font-size: .8rem; font-weight: 500; border-top: 1px solid var(--border); }
 .suggestion-status-badge.status-approved { color: var(--green); background: var(--green-soft); }
 .suggestion-status-badge.status-rejected { color: var(--text3); background: var(--surface2); }
+.suggestion-status-badge.status-warning { color: var(--orange); background: var(--orange-soft); }
+.suggestion-retry-row { padding: .4rem 1rem .6rem; border-top: 1px solid var(--border); display: flex; gap: .5rem; align-items: center; }
 
 /* ── Scan History ── */
 .scan-history-list { display: flex; flex-direction: column; gap: .5rem; }

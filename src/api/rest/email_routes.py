@@ -70,6 +70,7 @@ class SuggestionResponse(BaseModel):
     conflict_details: str
     alternative_slots: list[dict]
     created_at: str
+    calendar_event_id: str | None = None
 
 
 class ScanResultResponse(BaseModel):
@@ -198,6 +199,7 @@ async def get_suggestions(
             "conflict_details": s.conflict_details,
             "alternative_slots": s.alternative_slots,
             "created_at": s.created_at.isoformat() if s.created_at else "",
+            "calendar_event_id": s.calendar_event_id,
         }
         for s in suggestions
     ]

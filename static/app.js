@@ -1569,7 +1569,24 @@ function renderSuggestionCard(s, tab) {
         <button class="btn btn-ghost btn-sm" onclick="rejectSuggestion('${s.id}')">Dismiss</button>
       </div>`;
   } else if (tab === "approved") {
-    actions = `<div class="suggestion-status-badge status-approved">✅ Event Created</div>`;
+    const calId = s.calendar_event_id;
+    if (calId && !calId.startsWith("mem-")) {
+      actions = `<div class="suggestion-status-badge status-approved">✅ In Google Calendar</div>`;
+    } else if (calId && calId.startsWith("mem-")) {
+      const hasTime = !!s.proposed_start;
+      actions = `
+        <div class="suggestion-retry-row">
+          <div class="suggestion-status-badge status-warning" style="border:none;padding:.25rem .5rem">📅 Local Only</div>
+          <button class="btn btn-primary btn-sm" onclick="approveSuggestion('${s.id}', ${hasTime ? `'${s.proposed_start}'` : 'null'})">Sync to Google</button>
+        </div>`;
+    } else {
+      const hasTime = !!s.proposed_start;
+      actions = `
+        <div class="suggestion-retry-row">
+          <div class="suggestion-status-badge status-warning" style="border:none;padding:.25rem .5rem">⚠️ Not in Calendar</div>
+          <button class="btn btn-primary btn-sm" onclick="approveSuggestion('${s.id}', ${hasTime ? `'${s.proposed_start}'` : 'null'})">Add to Calendar</button>
+        </div>`;
+    }
   } else {
     actions = `<div class="suggestion-status-badge status-rejected">Dismissed</div>`;
   }

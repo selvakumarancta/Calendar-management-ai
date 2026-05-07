@@ -999,8 +999,12 @@ class EmailIntelligenceService:
             start = model.proposed_start or override_start
             end = model.proposed_end or override_end
 
-            # Create calendar event
-            if self._calendar and start and end:
+            # Create calendar event (skip if already a real Google Calendar event)
+            already_in_google = (
+                model.calendar_event_id
+                and not model.calendar_event_id.startswith("mem-")
+            )
+            if self._calendar and start and end and not already_in_google:
                 from src.domain.entities.calendar_event import Attendee, CalendarEvent
 
                 event = CalendarEvent(
