@@ -137,6 +137,20 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                     select(CalendarEventModel).where(CalendarEventModel.id == event.id)
                 )
                 row = existing.scalar_one_or_none()
+
+                # If not found by UUID, try by provider_event_id so we UPDATE the
+                # existing DB record rather than INSERT a duplicate.  This happens
+                # when a Google Calendar event is fetched (new random UUID each time)
+                # and then saved back after an edit.
+                if row is None and event.provider_event_id and event.user_id:
+                    dup = await session.execute(
+                        select(CalendarEventModel).where(
+                            CalendarEventModel.provider_event_id == event.provider_event_id,
+                            CalendarEventModel.user_id == event.user_id,
+                        )
+                    )
+                    row = dup.scalar_one_or_none()
+
                 data = self._entity_to_model_dict(event)
                 if row:
                     for k, v in data.items():
@@ -210,7 +224,7 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
             return []
 
     async def _db_get(self, event_id: UUID) -> CalendarEvent | None:
-        """Get a single event from the database."""
+        """Get a single event from the database by UUID."""
         if not self._db_session_factory:
             return None
         try:
@@ -228,6 +242,32 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
                 return self._model_to_entity(row) if row else None
         except Exception as e:
             logger.warning("Failed to get event from DB: %s", e)
+            return None
+
+    async def _db_get_by_provider_id(
+        self, provider_event_id: str, user_id: UUID
+    ) -> CalendarEvent | None:
+        """Get a single event from the database by provider_event_id + user_id."""
+        if not self._db_session_factory:
+            return None
+        try:
+            from sqlalchemy import select
+
+            from src.infrastructure.persistence.calendar_event_model import (
+                CalendarEventModel,
+            )
+
+            async with self._db_session_factory() as session:
+                result = await session.execute(
+                    select(CalendarEventModel).where(
+                        CalendarEventModel.provider_event_id == provider_event_id,
+                        CalendarEventModel.user_id == user_id,
+                    )
+                )
+                row = result.scalar_one_or_none()
+                return self._model_to_entity(row) if row else None
+        except Exception as e:
+            logger.warning("Failed to get event by provider_event_id from DB: %s", e)
             return None
 
     # ---- CalendarProviderPort -----------------------------------------
@@ -271,7 +311,7 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         event_id: str,
         calendar_id: str = "primary",
     ) -> CalendarEvent | None:
-        # Try DB
+        # Try DB by UUID
         try:
             uid = uuid.UUID(event_id)
             db_event = await self._db_get(uid)
@@ -280,7 +320,12 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         except ValueError:
             pass
 
-        # Fallback to in-memory
+        # Try DB by provider_event_id (handles mem-* IDs and Google event IDs stored locally)
+        db_event = await self._db_get_by_provider_id(event_id, user_id)
+        if db_event:
+            return db_event
+
+        # Fallback to in-memory cache
         for e in self._events.values():
             if e.user_id == user_id and (
                 str(e.id) == event_id or e.provider_event_id == event_id
@@ -294,6 +339,42 @@ class InMemoryCalendarAdapter(CalendarProviderPort, EventRepositoryPort):
         event: CalendarEvent,
     ) -> CalendarEvent:
         event.user_id = user_id
+
+        # Deduplicate: if a local event with the same title AND start_time
+        # already exists for this user, return it instead of creating a duplicate.
+        if self._db_session_factory and event.start_time:
+            try:
+                from sqlalchemy import select
+
+                from src.infrastructure.persistence.calendar_event_model import (
+                    CalendarEventModel,
+                )
+
+                start_naive = (
+                    event.start_time.replace(tzinfo=None)
+                    if event.start_time.tzinfo
+                    else event.start_time
+                )
+                async with self._db_session_factory() as session:
+                    existing = await session.execute(
+                        select(CalendarEventModel).where(
+                            CalendarEventModel.user_id == user_id,
+                            CalendarEventModel.title == event.title,
+                            CalendarEventModel.start_time == start_naive,
+                            CalendarEventModel.provider_event_id.like("mem-%"),
+                        )
+                    )
+                    dup_row = existing.scalar_one_or_none()
+                    if dup_row:
+                        logger.debug(
+                            "Returning existing local event (dedup): %s at %s",
+                            event.title,
+                            start_naive,
+                        )
+                        return self._model_to_entity(dup_row)
+            except Exception as _dedup_err:
+                logger.debug("Dedup check failed (non-fatal): %s", _dedup_err)
+
         if not event.provider_event_id:
             event.provider_event_id = f"mem-{uuid.uuid4().hex[:12]}"
         self._events[event.id] = event

@@ -11,6 +11,33 @@ let weekOffset = 0;
 let currentOrgId = null;
 let orgs = [];
 
+// Current user's system role (populated after login)
+let _currentRole = "user"; // "user" | "admin" | "superadmin"
+
+// Parse the role claim from a JWT without verifying the signature
+function _parseJwtRole(jwt) {
+  try {
+    const payload = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.role || "user";
+  } catch (_) {
+    return "user";
+  }
+}
+
+function _applyRole(role) {
+  _currentRole = role || "user";
+  const isAdmin = _currentRole === "admin" || _currentRole === "superadmin";
+
+  // Show/hide admin nav button
+  const adminBtn = document.getElementById("nav-admin-btn");
+  if (adminBtn) adminBtn.style.display = isAdmin ? "" : "none";
+
+  // Admins see an info banner instead of approve/reject buttons
+  // (buttons are hidden via class applied to body)
+  document.body.classList.toggle("role-admin", isAdmin);
+  document.body.classList.toggle("role-user",  !isAdmin);
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -18,7 +45,10 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshToken = localStorage.getItem("refresh_token");
   currentOrgId = localStorage.getItem("currentOrgId");
   document.getElementById("sidebar").style.display = "none";
-  if (token) showApp();
+  if (token) {
+    _applyRole(_parseJwtRole(token));
+    showApp();
+  }
 
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -76,6 +106,7 @@ async function loginDev() {
     refreshToken = res.refresh_token || null;
     localStorage.setItem("token", token);
     if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    _applyRole(_parseJwtRole(token));
     showApp();
   } catch (e) { showToast("Dev login failed: " + e.message, "error"); }
 }
@@ -110,6 +141,7 @@ async function loginEmail() {
     refreshToken = res.refresh_token || null;
     localStorage.setItem("token", token);
     if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    _applyRole(_parseJwtRole(token));
     showApp();
   } catch (e) { showToast(e.message || "Login failed", "error"); }
 }
@@ -126,6 +158,7 @@ async function registerEmail() {
     refreshToken = res.refresh_token || null;
     localStorage.setItem("token", token);
     if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    _applyRole(_parseJwtRole(token));
     showApp();
   } catch (e) { showToast(e.message || "Registration failed", "error"); }
 }
@@ -172,14 +205,18 @@ function toggleTheme() {
 
 function logout() {
   token = null; refreshToken = null; conversationId = null; currentOrgId = null;
+  _currentRole = "user";
   localStorage.removeItem("token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("currentOrgId");
   if (ws) { ws.close(); ws = null; }
+  document.body.classList.remove("role-admin", "role-user");
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("login-view").classList.add("active");
   document.getElementById("sidebar").style.display = "none";
   document.getElementById("org-selector").style.display = "none";
+  const adminBtn = document.getElementById("nav-admin-btn");
+  if (adminBtn) adminBtn.style.display = "none";
   setStatus(false);
 }
 
@@ -190,6 +227,15 @@ async function showApp() {
   connectWS();
   loadProfile();
   await loadOrganizations();
+
+  // After returning from OAuth reconnect, auto-sync local events to Google
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reconnected") === "1") {
+    window.history.replaceState({}, "", window.location.pathname);
+    showToast("Google reconnected! Syncing local events to Google Calendar...", "success");
+    // Give server a moment to store the new token, then auto-sync and switch to calendar view
+    setTimeout(() => syncLocalEventsToGoogle(true), 1500);
+  }
 }
 
 // ── Navigation ─────────────────────────────────────────────────
@@ -207,6 +253,7 @@ function switchView(name) {
   if (name === "email") loadEmailView();
   if (name === "scheduling") loadSchedulingView();
   if (name === "whatsapp") loadWhatsAppView();
+  if (name === "admin") loadAdminView();
 }
 
 // ── Quick Chat (from quick-action buttons) ─────────────────────
@@ -364,6 +411,10 @@ async function loadProviders() {
           <span class="sync-icons">
             🔒 ${c.calendar_sync_enabled ? "📅" : ""} ${c.email_sync_enabled ? "📨" : ""}
           </span>
+          ${c.provider === "google" ? `
+          <button class="btn btn-ghost btn-sm" onclick="reconnectGoogleCalendar()" title="Re-authorize with full calendar write scope">🔑 Reconnect</button>
+          <button class="btn btn-ghost btn-sm" data-sync-btn onclick="syncLocalEventsToGoogle()" title="Push locally-stored events to Google Calendar">☁️ Sync to Google</button>
+          ` : ""}
         </div>
       </div>
     `).join("") + '<div class="provider-security-note">🔒 Tokens encrypted at rest · OAuth2 — your password is never stored</div>';
@@ -619,9 +670,12 @@ async function loadEvents() {
       badge.style.display = events.length ? "inline-flex" : "none";
     }
 
-    // Rebuild event store for edit/delete lookups
+    // Rebuild event store for edit/delete lookups.
+    // Key by provider_event_id when available (stable Google/local ID) so that
+    // edit/delete can use the same ID that the backend understands. Google events
+    // get a fresh random UUID on every list_events call, so ev.id is NOT stable.
     _eventsById = {};
-    events.forEach(ev => { _eventsById[ev.id] = ev; });
+    events.forEach(ev => { _eventsById[ev.provider_event_id || ev.id] = ev; });
 
     // Ensure times are parsed as UTC (API returns naive ISO strings without Z)
     const toUtc = s => s.endsWith('Z') || s.includes('+') ? s : s + 'Z';
@@ -712,9 +766,9 @@ async function loadEvents() {
                 ${ev.is_all_day ? '<span>📅 All-day event</span>' : ''}
                 <span class="ev-badge ${statusCls}">${status}</span>
                 <div class="ev-actions" onclick="event.stopPropagation()">
-                  <button class="btn btn-ghost btn-xs" onclick="openEditEventModal('${esc(ev.id)}')">✏️ Edit</button>
-                  <button class="btn btn-danger-ghost btn-xs" onclick="deleteEvent('${esc(ev.id)}')">🗑 Delete</button>
-                  <a class="btn btn-ghost btn-xs" href="/api/v1/calendar/events/${esc(ev.id)}/ics" download>📅 .ics</a>
+                  <button class="btn btn-ghost btn-xs" onclick="openEditEventModal('${esc(ev.provider_event_id || ev.id)}')">✏️ Edit</button>
+                  <button class="btn btn-danger-ghost btn-xs" onclick="deleteEvent('${esc(ev.provider_event_id || ev.id)}')">🗑 Delete</button>
+                  <a class="btn btn-ghost btn-xs" href="/api/v1/calendar/events/${esc(ev.provider_event_id || ev.id)}/ics" download>📅 .ics</a>
                 </div>
               </div>
             </div>
@@ -765,6 +819,29 @@ async function checkGoogleCalendarScope() {
 async function reconnectGoogleCalendar() {
   // Navigate directly — the endpoint now issues a 302 redirect to Google
   window.location.href = "/api/v1/auth/google/reconnect";
+}
+
+async function syncLocalEventsToGoogle(autoMode = false) {
+  const btn = document.querySelector("[data-sync-btn]");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Syncing..."; }
+  try {
+    const res = await api("POST", "/api/v1/calendar/events/sync-local-to-google");
+    if (res.local_events_found === 0) {
+      if (!autoMode) showToast("All events are already in Google Calendar", "success");
+    } else {
+      const msg = `Synced ${res.synced} of ${res.local_events_found} local event(s) to Google Calendar`
+        + (res.failed > 0 ? ` (${res.failed} failed — reconnect Google if error persists)` : "");
+      showToast(msg, res.failed === 0 ? "success" : "warning");
+    }
+    // Always refresh events + clear scope banner after a sync attempt
+    await loadEvents();
+    await checkGoogleCalendarScope();
+    if (autoMode) switchView("calendar");
+  } catch (e) {
+    showToast("Sync failed: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "☁️ Sync to Google"; }
+  }
 }
 
 function filterEvents(query) {
@@ -1032,6 +1109,7 @@ async function loadProfile() {
       <div class="profile-row"><span class="profile-label">Email</span><span class="profile-value">${esc(u.email)}</span></div>
       <div class="profile-row"><span class="profile-label">Plan</span><span class="profile-value" style="text-transform:capitalize">${esc(u.plan)}</span></div>
       <div class="profile-row"><span class="profile-label">Organizations</span><span class="profile-value">${orgs.length}</span></div>
+      <div class="profile-row"><span class="profile-label">Timezone</span><span class="profile-value">${esc(u.timezone || "UTC")}</span></div>
       <div class="profile-row">
         <span class="profile-label">Usage</span>
         <span class="profile-value">
@@ -1040,6 +1118,17 @@ async function loadProfile() {
         </span>
       </div>
     `;
+
+    // Show role badge
+    const roleEl = document.getElementById("profile-role-badge");
+    if (roleEl && u.system_role) {
+      const roleColors = { user: "#6366f1", admin: "#f59e0b", superadmin: "#ef4444" };
+      const roleLabels = { user: "👤 User", admin: "🛡 Admin", superadmin: "⚡ Superadmin" };
+      const color = roleColors[u.system_role] || "#6366f1";
+      roleEl.style.display = "block";
+      roleEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:20px;font-size:.78rem;font-weight:600;background:${color}22;color:${color};border:1px solid ${color}55">${roleLabels[u.system_role] || u.system_role}</span>`;
+    }
+
     // Pre-fill edit fields
     const nameEl = document.getElementById("profile-name");
     const tzEl   = document.getElementById("profile-timezone");
@@ -1779,29 +1868,48 @@ async function _doApprove(id, startTime, endTime, card, btns) {
     const body = {};
     if (startTime) { body.start_time = startTime; body.end_time = endTime; }
     const result = await api("POST", `/api/v1/email/suggestions/${id}/approve`, body);
-    const actionsDiv = card.querySelector(".suggestion-actions");
-    actionsDiv.innerHTML = `<div class="suggestion-status-badge status-approved">✅ Event Created: ${esc(result.title)}</div>`;
+    const actionsDiv = card ? card.querySelector(".suggestion-actions") : null;
+    const calId = result.calendar_event_id || "";
+    const isGoogle = calId && !calId.startsWith("mem-");
+    const isLocal = calId && calId.startsWith("mem-");
+    let statusHtml;
+    if (isGoogle) {
+      statusHtml = `<div class="suggestion-status-badge status-approved">✅ Added to Google Calendar</div>`;
+    } else if (isLocal) {
+      statusHtml = `<div class="suggestion-status-badge status-warning" style="display:flex;align-items:center;gap:8px;">
+        📅 Added locally <span style="font-size:.75rem;color:var(--text2)">(Reconnect Google to sync)</span>
+      </div>`;
+    } else {
+      statusHtml = `<div class="suggestion-status-badge status-warning">⚠️ Event not created — no time provided</div>`;
+    }
+    if (actionsDiv) actionsDiv.innerHTML = statusHtml;
     // Ensure modal is closed (in case _doApprove was called from somewhere else)
     document.getElementById("approve-time-modal")?.remove();
     await loadEmailSuggestions();
-    showToast("Event created! Switching to Calendar…");
+    const toastMsg = isGoogle ? "✅ Event added to Google Calendar!" : isLocal ? "📅 Event added locally (sync to Google after reconnect)" : "⚠️ Approved but no event created";
+    showToast(toastMsg, isGoogle ? "success" : isLocal ? "info" : "warning");
 
-    // Navigate to Calendar tab and jump to the week containing the new event
-    const eventStart = startTime || result.proposed_start;
-    if (eventStart) {
-      const eventDate = new Date(eventStart);
-      const now = new Date();
-      const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-      const currentWeekStart = new Date(now);
-      currentWeekStart.setDate(now.getDate() - now.getDay());
-      currentWeekStart.setHours(0, 0, 0, 0);
-      const eventWeekStart = new Date(eventDate);
-      eventWeekStart.setDate(eventDate.getDate() - eventDate.getDay());
-      eventWeekStart.setHours(0, 0, 0, 0);
-      weekOffset = Math.round((eventWeekStart - currentWeekStart) / msPerWeek);
+    // Navigate to Calendar tab and jump to the week containing the new event.
+    // Use Math.floor (not round) so a Sunday event (getDay()=0) doesn't jump
+    // one week too far — the loadEvents range always starts on a Sunday, so
+    // rounding 1.857 weeks up to 2 would skip the event entirely.
+    if (isGoogle || isLocal) {
+      const eventStart = startTime || result.proposed_start;
+      if (eventStart) {
+        const eventDate = new Date(eventStart);
+        const now = new Date();
+        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - now.getDay());
+        currentWeekStart.setHours(0, 0, 0, 0);
+        const eventWeekStart = new Date(eventDate);
+        eventWeekStart.setDate(eventDate.getDate() - eventDate.getDay());
+        eventWeekStart.setHours(0, 0, 0, 0);
+        weekOffset = Math.floor((eventWeekStart - currentWeekStart) / msPerWeek);
+      }
+      switchView("calendar");
+      await loadEvents();
     }
-    switchView("calendar");
-    await loadEvents();
   } catch (e) {
     showToast("Failed to approve: " + e.message, "error");
     btns.forEach(b => b.disabled = false);
@@ -2367,6 +2475,214 @@ function renderAnalyticsSummary(summary, container) {
   `;
 }
 
+// ── Admin Dashboard ────────────────────────────────────────────
+
+let _adminCurrentTab = "users";
+
+async function loadAdminView() {
+  await loadAdminStats();
+  _adminCurrentTab = "users";
+  document.querySelectorAll("[data-atab]").forEach(t => t.classList.toggle("active", t.dataset.atab === "users"));
+  document.getElementById("admin-panel-users").style.display = "";
+  document.getElementById("admin-panel-suggestions").style.display = "none";
+  document.getElementById("admin-panel-events").style.display = "none";
+  await loadAdminUsers();
+}
+
+async function loadAdminStats() {
+  try {
+    const stats = await api("GET", "/api/v1/admin/rbac/stats");
+    const u = stats.users || {};
+    const s = stats.suggestions || {};
+    const el = id => document.getElementById(id);
+    if (el("admin-stat-users"))    el("admin-stat-users").textContent    = u.total ?? "—";
+    if (el("admin-stat-pending"))  el("admin-stat-pending").textContent  = s.pending ?? "—";
+    if (el("admin-stat-approved")) el("admin-stat-approved").textContent = s.approved ?? "—";
+    if (el("admin-stat-total-sug")) el("admin-stat-total-sug").textContent = s.total ?? "—";
+
+    // Role badge on nav
+    const badge = document.getElementById("nav-admin-badge");
+    if (badge && u.by_role) {
+      const adminCount = (u.by_role.admin || 0) + (u.by_role.superadmin || 0);
+      if (adminCount > 0) {
+        badge.textContent = adminCount;
+        badge.style.display = "inline-flex";
+      }
+    }
+  } catch (_) { /* non-admin — silently ignore */ }
+}
+
+function switchAdminTab(tab) {
+  _adminCurrentTab = tab;
+  document.querySelectorAll("[data-atab]").forEach(t => t.classList.toggle("active", t.dataset.atab === tab));
+  document.getElementById("admin-panel-users").style.display       = tab === "users" ? "" : "none";
+  document.getElementById("admin-panel-suggestions").style.display = tab === "suggestions" ? "" : "none";
+  document.getElementById("admin-panel-events").style.display      = tab === "events" ? "" : "none";
+
+  if (tab === "users")       loadAdminUsers();
+  if (tab === "suggestions") loadAdminSuggestions();
+  if (tab === "events")      loadAdminEvents();
+}
+
+async function loadAdminUsers() {
+  const container = document.getElementById("admin-users-list");
+  container.innerHTML = '<div class="empty-state">Loading...</div>';
+  try {
+    const users = await api("GET", "/api/v1/admin/rbac/users?limit=100");
+    if (!users.length) {
+      container.innerHTML = '<div class="empty-state">No users found.</div>';
+      return;
+    }
+    const roleColors = { user: "#6366f1", admin: "#f59e0b", superadmin: "#ef4444" };
+    container.innerHTML = `
+      <table class="admin-table" style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);text-align:left">
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">User</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Timezone</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Plan</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Role</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Status</th>
+            ${_currentRole === "superadmin" ? '<th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Actions</th>' : ""}
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => {
+            const color = roleColors[u.system_role || "user"] || "#6366f1";
+            const isSuperadmin = _currentRole === "superadmin";
+            return `
+              <tr style="border-bottom:1px solid var(--border)" id="admin-user-row-${u.id}">
+                <td style="padding:.6rem .75rem">
+                  <div style="font-weight:500;color:var(--text1)">${esc(u.name || "(no name)")}</div>
+                  <div style="font-size:.78rem;color:var(--text2)">${esc(u.email)}</div>
+                </td>
+                <td style="padding:.6rem .75rem;color:var(--text2)">${esc(u.timezone || "UTC")}</td>
+                <td style="padding:.6rem .75rem;text-transform:capitalize;color:var(--text2)">${esc(u.plan)}</td>
+                <td style="padding:.6rem .75rem">
+                  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.72rem;font-weight:600;background:${color}22;color:${color};border:1px solid ${color}44">
+                    ${esc(u.system_role || "user")}
+                  </span>
+                </td>
+                <td style="padding:.6rem .75rem">
+                  <span style="color:${u.is_active ? 'var(--green)' : 'var(--red)'}">${u.is_active ? "● Active" : "● Inactive"}</span>
+                </td>
+                ${isSuperadmin ? `
+                <td style="padding:.6rem .75rem">
+                  <select class="select-minimal" style="font-size:.75rem" onchange="adminSetRole('${u.id}', this.value, this)">
+                    <option value="user"       ${u.system_role === "user"        ? "selected" : ""}>user</option>
+                    <option value="admin"      ${u.system_role === "admin"       ? "selected" : ""}>admin</option>
+                    <option value="superadmin" ${u.system_role === "superadmin"  ? "selected" : ""}>superadmin</option>
+                  </select>
+                </td>` : ""}
+              </tr>`;
+          }).join("")}
+        </tbody>
+      </table>`;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
+async function adminSetRole(userId, newRole, selectEl) {
+  const originalValue = [...selectEl.options].find(o => !o.selected)?.value;
+  selectEl.disabled = true;
+  try {
+    await api("PATCH", `/api/v1/admin/rbac/users/${userId}/role?role=${encodeURIComponent(newRole)}`);
+    showToast(`Role updated to ${newRole}`);
+    // Refresh table row color
+    await loadAdminUsers();
+  } catch (err) {
+    showToast("Failed: " + err.message, "error");
+    selectEl.disabled = false;
+  }
+}
+
+async function loadAdminSuggestions() {
+  const container = document.getElementById("admin-suggestions-list");
+  container.innerHTML = '<div class="empty-state">Loading...</div>';
+  const status = document.getElementById("admin-sug-status")?.value || "";
+  try {
+    const url = "/api/v1/admin/rbac/suggestions?limit=100" + (status ? "&status=" + encodeURIComponent(status) : "");
+    const rows = await api("GET", url);
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state">No suggestions found.</div>';
+      return;
+    }
+    const statusColors = { pending: "#f59e0b", approved: "var(--green)", rejected: "var(--text2)" };
+    container.innerHTML = `
+      <table class="admin-table" style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);text-align:left">
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Title</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">From</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Proposed Start (UTC)</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Status</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">User ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const color = statusColors[r.status] || "var(--text2)";
+            const startStr = r.proposed_start
+              ? new Date(r.proposed_start.endsWith("Z") ? r.proposed_start : r.proposed_start + "Z").toLocaleString()
+              : "—";
+            return `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:.6rem .75rem;font-weight:500;color:var(--text1)">${esc(r.title || "—")}</td>
+                <td style="padding:.6rem .75rem;font-size:.78rem;color:var(--text2)">${esc(r.email_sender || "—")}</td>
+                <td style="padding:.6rem .75rem;font-size:.78rem;color:var(--text2)">${startStr}</td>
+                <td style="padding:.6rem .75rem"><span style="color:${color};font-weight:600;font-size:.78rem">${esc(r.status)}</span></td>
+                <td style="padding:.6rem .75rem;font-size:.72rem;color:var(--text3);font-family:monospace">${esc(r.user_id.slice(0,8))}…</td>
+              </tr>`;
+          }).join("")}
+        </tbody>
+      </table>`;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
+async function loadAdminEvents() {
+  const container = document.getElementById("admin-events-list");
+  container.innerHTML = '<div class="empty-state">Loading...</div>';
+  try {
+    const rows = await api("GET", "/api/v1/admin/rbac/events?limit=100");
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state">No events found.</div>';
+      return;
+    }
+    container.innerHTML = `
+      <table class="admin-table" style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);text-align:left">
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Title</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Start (UTC)</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Source</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">Status</th>
+            <th style="padding:.5rem .75rem;color:var(--text2);font-weight:600">User ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const startStr = r.start_time
+              ? new Date(r.start_time.endsWith("Z") ? r.start_time : r.start_time + "Z").toLocaleString()
+              : "—";
+            return `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:.6rem .75rem;font-weight:500;color:var(--text1)">${esc(r.title || "—")}</td>
+                <td style="padding:.6rem .75rem;font-size:.78rem;color:var(--text2)">${startStr}</td>
+                <td style="padding:.6rem .75rem;font-size:.78rem;color:var(--text2)">${esc(r.source || "—")}</td>
+                <td style="padding:.6rem .75rem;font-size:.78rem;color:var(--text2)">${esc(r.status || "—")}</td>
+                <td style="padding:.6rem .75rem;font-size:.72rem;color:var(--text3);font-family:monospace">${esc(r.user_id.slice(0,8))}…</td>
+              </tr>`;
+          }).join("")}
+        </tbody>
+      </table>`;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
 // ── API helper ─────────────────────────────────────────────────
 
 async function api(method, path, body) {
@@ -2429,8 +2745,10 @@ let toastTimer = null;
 function showToast(msg, type = "success") {
   const toast = document.getElementById("settings-toast");
   toast.textContent = msg;
-  toast.style.borderColor = type === "error" ? "var(--red)" : "var(--green)";
-  toast.style.color = type === "error" ? "var(--red)" : "var(--green)";
+  const colorMap = { error: "var(--red)", warning: "var(--orange, #f59e0b)", info: "var(--blue, #3b82f6)", success: "var(--green)" };
+  const c = colorMap[type] || colorMap.success;
+  toast.style.borderColor = c;
+  toast.style.color = c;
   toast.classList.add("visible");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("visible"), 3000);
