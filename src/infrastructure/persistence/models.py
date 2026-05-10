@@ -28,6 +28,7 @@ class UserModel(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
     plan: Mapped[str] = mapped_column(String(20), nullable=False, default="free")
+    system_role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Google OAuth (encrypted at rest)

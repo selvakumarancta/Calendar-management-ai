@@ -157,3 +157,45 @@ async def get_optional_user(
         return await get_current_user(credentials, container, session)
     except HTTPException:
         return None
+
+
+# ---------------------------------------------------------------------------
+# RBAC helpers
+# ---------------------------------------------------------------------------
+
+from src.domain.entities.user import SystemRole  # noqa: E402
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Raise 403 if the caller is not an admin or superadmin."""
+    if current_user.system_role not in (SystemRole.ADMIN, SystemRole.SUPERADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
+    return current_user
+
+
+def require_superadmin(current_user: User = Depends(get_current_user)) -> User:
+    """Raise 403 if the caller is not a superadmin."""
+    if current_user.system_role != SystemRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin access required.",
+        )
+    return current_user
+
+
+def get_scoped_user_id(
+    target_user_id: UUID | None = None,
+    current_user: User = Depends(get_current_user),
+) -> UUID:
+    """
+    Return the effective user ID for data access.
+
+    - Regular users: always return their own ID (ignores target_user_id)
+    - Admins/Superadmins: can supply a target_user_id to view another user's data
+    """
+    if current_user.system_role in (SystemRole.ADMIN, SystemRole.SUPERADMIN):
+        return target_user_id if target_user_id else current_user.id
+    return current_user.id

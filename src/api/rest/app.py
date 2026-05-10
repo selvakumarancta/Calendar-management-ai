@@ -19,7 +19,7 @@ from src.api.middleware.correlation_id import CorrelationIdMiddleware
 from src.api.middleware.rate_limiter import RateLimiterMiddleware
 from src.api.rest.email_routes import email_router
 from src.api.rest.org_routes import google_callback_router, org_router
-from src.api.rest.whatsapp_routes import whatsapp_router
+from src.api.rest.admin_routes import admin_rbac_router
 from src.api.rest.routes import (
     admin_router,
     auth_router,
@@ -28,6 +28,7 @@ from src.api.rest.routes import (
     health_router,
 )
 from src.api.rest.settings_routes import settings_router
+from src.api.rest.whatsapp_routes import whatsapp_router
 from src.config.container import Container
 from src.config.logging_config import configure_logging
 from src.config.settings import get_settings
@@ -133,9 +134,72 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.email_scanner = scanner
     await scanner.start()
 
+    # Start background Google token refresh loop so access tokens are always
+    # kept alive — this is the permanent solution to "event not in calendar
+    # after approval" caused by an expired access token.
+    import asyncio
+
+    async def _token_refresh_loop() -> None:
+        """Proactively refresh all active Google tokens every 30 minutes.
+
+        Google access tokens expire after 60 minutes.  Refreshing at -30 min
+        guarantees every request always has at least 30 minutes of headroom,
+        regardless of how long the user was idle.
+        """
+        REFRESH_INTERVAL_S = 30 * 60  # 30 minutes
+        while True:
+            await asyncio.sleep(REFRESH_INTERVAL_S)
+            try:
+                db = container.database()
+                cal = container.calendar_adapter()
+                from sqlalchemy import select
+
+                from src.infrastructure.persistence.org_models import (
+                    ProviderConnectionModel,
+                )
+
+                async with db.session_factory() as session:
+                    result = await session.execute(
+                        select(ProviderConnectionModel.user_id)
+                        .where(
+                            ProviderConnectionModel.provider == "google",
+                            ProviderConnectionModel.status == "active",
+                            ProviderConnectionModel.access_token != "dev-token",
+                        )
+                        .distinct()
+                    )
+                    user_ids = [r[0] for r in result.fetchall()]
+
+                refreshed = 0
+                for uid in user_ids:
+                    try:
+                        tokens = await cal._get_google_tokens(uid)
+                        if tokens:
+                            refreshed += 1
+                    except Exception as _e:
+                        logger.debug("Token refresh loop error for %s: %s", uid, _e)
+                if user_ids:
+                    logger.info(
+                        "Token refresh loop: refreshed %d/%d Google tokens",
+                        refreshed,
+                        len(user_ids),
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as loop_err:
+                logger.warning("Token refresh loop error (non-fatal): %s", loop_err)
+
+    refresh_task = asyncio.create_task(_token_refresh_loop())
+    app.state.token_refresh_task = refresh_task
+
     logger.info("🚀 Calendar Agent starting in %s mode", settings.app_env)
     yield
     # Shutdown
+    refresh_task.cancel()
+    try:
+        await refresh_task
+    except asyncio.CancelledError:
+        pass
     await scanner.stop()
     await container.shutdown()
     logger.info("👋 Calendar Agent shut down")
@@ -251,10 +315,9 @@ def create_app() -> FastAPI:
     app.include_router(
         email_router, prefix="/api/v1/email", tags=["Email Intelligence"]
     )
-    app.include_router(
-        whatsapp_router, prefix="/api/v1/webhooks", tags=["WhatsApp"]
-    )
+    app.include_router(whatsapp_router, prefix="/api/v1/webhooks", tags=["WhatsApp"])
     app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
+    app.include_router(admin_rbac_router, prefix="/api/v1/admin/rbac", tags=["Admin RBAC"])
 
     # Billing routes
     from src.api.rest.billing_routes import billing_router

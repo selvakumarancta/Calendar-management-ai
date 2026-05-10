@@ -124,6 +124,7 @@ class UserProfileDTO(BaseModel):
     name: str
     timezone: str
     plan: str
+    system_role: str = "user"
     monthly_requests_used: int = 0
     monthly_request_limit: int = 0
 

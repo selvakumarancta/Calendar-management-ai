@@ -467,15 +467,20 @@ class EmailIntelligenceService:
                                     clf_response.duration_minutes or 30
                                 ),
                             )
-                            # Try to extract time from proposed_times
-                            if clf_response.proposed_times:
-                                time_text = " ".join(clf_response.proposed_times[:2])
-                                analysis_for_suggestion.suggested_time = (
-                                    self._extract_time(time_text)
-                                )
-                                analysis_for_suggestion.suggested_date = (
-                                    self._extract_date(time_text)
-                                )
+                            # Extract time: prefer proposed_times from LLM, then
+                            # fall back to raw email text so "May 10th at 9pm"-style
+                            # snippets are still parsed when the LLM omits them.
+                            _time_src = (
+                                " ".join(clf_response.proposed_times[:2])
+                                if clf_response.proposed_times
+                                else f"{email.subject} {email.body_text[:400]}"
+                            )
+                            analysis_for_suggestion.suggested_time = self._extract_time(
+                                _time_src
+                            )
+                            analysis_for_suggestion.suggested_date = self._extract_date(
+                                _time_src
+                            )
 
                             suggestion = await self._create_suggestion(
                                 email=email,
@@ -521,14 +526,17 @@ class EmailIntelligenceService:
                                     clf_response.duration_minutes or 30
                                 ),
                             )
-                            if clf_response.proposed_times:
-                                _t = " ".join(clf_response.proposed_times[:2])
-                                already_resolved_analysis.suggested_time = (
-                                    self._extract_time(_t)
-                                )
-                                already_resolved_analysis.suggested_date = (
-                                    self._extract_date(_t)
-                                )
+                            _t_src = (
+                                " ".join(clf_response.proposed_times[:2])
+                                if clf_response.proposed_times
+                                else f"{email.subject} {email.body_text[:400]}"
+                            )
+                            already_resolved_analysis.suggested_time = (
+                                self._extract_time(_t_src)
+                            )
+                            already_resolved_analysis.suggested_date = (
+                                self._extract_date(_t_src)
+                            )
                             resolved_suggestion = None
                             if clf_response.category in _MEETING_CATEGORIES:
                                 result.actionable_found += 1
@@ -577,10 +585,13 @@ class EmailIntelligenceService:
                                     clf_response.duration_minutes or 30
                                 ),
                             )
-                            if clf_response.proposed_times:
-                                _t2 = " ".join(clf_response.proposed_times[:2])
-                                nd_analysis.suggested_time = self._extract_time(_t2)
-                                nd_analysis.suggested_date = self._extract_date(_t2)
+                            _t2_src = (
+                                " ".join(clf_response.proposed_times[:2])
+                                if clf_response.proposed_times
+                                else f"{email.subject} {email.body_text[:400]}"
+                            )
+                            nd_analysis.suggested_time = self._extract_time(_t2_src)
+                            nd_analysis.suggested_date = self._extract_date(_t2_src)
                             result.actionable_found += 1
                             nd_suggestion = await self._create_suggestion(
                                 email=email,
@@ -1146,10 +1157,13 @@ class EmailIntelligenceService:
             # Deduplication: skip if a suggestion for the same email already exists
             if suggestion.email_provider_id:
                 existing = await session.execute(
-                    select(ScheduleSuggestionModel.id).where(
+                    select(ScheduleSuggestionModel.id)
+                    .where(
                         ScheduleSuggestionModel.user_id == suggestion.user_id,
-                        ScheduleSuggestionModel.email_provider_id == suggestion.email_provider_id,
-                    ).limit(1)
+                        ScheduleSuggestionModel.email_provider_id
+                        == suggestion.email_provider_id,
+                    )
+                    .limit(1)
                 )
                 if existing.scalar_one_or_none():
                     logger.debug(
@@ -1451,10 +1465,50 @@ class EmailIntelligenceService:
                 days_ahead = 7
             target_date = (local_now + timedelta(days=days_ahead)).date()
         elif date_str:
-            try:
-                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except ValueError:
-                pass
+            # Try strict ISO format first, then named-month formats
+            parsed = False
+            for fmt in (
+                "%Y-%m-%d",
+                "%B %d",
+                "%b %d",
+                "%B %dst",
+                "%B %dnd",
+                "%B %drd",
+                "%B %dth",
+                "%b %dst",
+                "%b %dnd",
+                "%b %drd",
+                "%b %dth",
+            ):
+                try:
+                    tmp = datetime.strptime(date_str.strip(), fmt)
+                    # For formats without a year, use the near-future year
+                    year = tmp.year if tmp.year != 1900 else local_now.year
+                    candidate = tmp.replace(year=year).date()
+                    # If the date is in the past (>30 days ago), roll to next year
+                    if (candidate - local_now.date()).days < -30:
+                        candidate = candidate.replace(year=year + 1)
+                    target_date = candidate
+                    parsed = True
+                    break
+                except ValueError:
+                    continue
+            if not parsed:
+                # Try ordinal suffix removal: "May 10th" → "May 10"
+                import re as _re
+
+                cleaned = _re.sub(r"(\d+)(?:st|nd|rd|th)\b", r"\1", date_str.strip())
+                for fmt in ("%B %d", "%b %d"):
+                    try:
+                        tmp = datetime.strptime(cleaned, fmt)
+                        year = local_now.year
+                        candidate = tmp.replace(year=year).date()
+                        if (candidate - local_now.date()).days < -30:
+                            candidate = candidate.replace(year=year + 1)
+                        target_date = candidate
+                        break
+                    except ValueError:
+                        continue
 
         # Resolve time
         hour, minute = 10, 0  # Default: 10 AM in user's timezone

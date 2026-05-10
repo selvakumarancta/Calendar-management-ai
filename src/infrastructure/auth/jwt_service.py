@@ -36,6 +36,7 @@ class JWTService:
             "sub": str(user.id),
             "email": user.email,
             "plan": user.plan.value,
+            "role": user.system_role.value,  # RBAC role in JWT
             "type": "access",
             "jti": str(uuid.uuid4()),
             "iat": now,

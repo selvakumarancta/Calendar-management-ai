@@ -320,10 +320,9 @@ class WhatsAppIntelligenceService:
                         else f"\n\n📱 From WhatsApp: {msg.from_phone}"
                     )
                     # Match on internal id (CHAR(32) without dashes) from hook_result
-                    db_event_id = (
-                        hook_result.get("event_id")
-                        or str(getattr(created_event, "id", "")).replace("-", "")
-                    )
+                    db_event_id = hook_result.get("event_id") or str(
+                        getattr(created_event, "id", "")
+                    ).replace("-", "")
                     if db_event_id:
                         async with self._db() as session:
                             await session.execute(

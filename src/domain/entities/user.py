@@ -20,6 +20,14 @@ class SubscriptionPlan(str, Enum):
     ENTERPRISE = "enterprise"
 
 
+class SystemRole(str, Enum):
+    """Platform-wide RBAC roles (orthogonal to org roles)."""
+
+    USER = "user"        # Regular user — sees only their own data
+    ADMIN = "admin"      # Platform admin — read-only oversight of all users
+    SUPERADMIN = "superadmin"  # Full platform control (seeded via env/CLI)
+
+
 @dataclass
 class User:
     """Core user entity."""
@@ -29,6 +37,7 @@ class User:
     name: str = ""
     timezone: str = "UTC"
     plan: SubscriptionPlan = SubscriptionPlan.FREE
+    system_role: SystemRole = SystemRole.USER  # RBAC: user | admin | superadmin
     is_active: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

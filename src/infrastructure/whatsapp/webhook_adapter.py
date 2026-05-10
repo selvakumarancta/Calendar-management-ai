@@ -19,11 +19,11 @@ class WhatsAppMessage:
     """Normalized inbound WhatsApp message."""
 
     message_id: str
-    from_phone: str          # e.g. "919876543210"
-    display_phone: str       # formatted with country prefix
-    text: str                # raw message body
-    timestamp: int           # unix epoch
-    phone_number_id: str     # our receiving phone number ID
+    from_phone: str  # e.g. "919876543210"
+    display_phone: str  # formatted with country prefix
+    text: str  # raw message body
+    timestamp: int  # unix epoch
+    phone_number_id: str  # our receiving phone number ID
 
 
 class WhatsAppWebhookAdapter:
@@ -66,11 +66,14 @@ class WhatsAppWebhookAdapter:
         """Verify Meta's HMAC-SHA256 signature header (optional but recommended)."""
         if not self._webhook_secret:
             return True  # skip if not configured
-        expected = "sha256=" + hmac.new(
-            self._webhook_secret.encode(),
-            raw_body,
-            hashlib.sha256,
-        ).hexdigest()
+        expected = (
+            "sha256="
+            + hmac.new(
+                self._webhook_secret.encode(),
+                raw_body,
+                hashlib.sha256,
+            ).hexdigest()
+        )
         return hmac.compare_digest(expected, x_hub_signature_256 or "")
 
     # ------------------------------------------------------------------
@@ -93,7 +96,8 @@ class WhatsAppWebhookAdapter:
                     # Only process plain text messages
                     if msg.get("type") != "text":
                         logger.debug(
-                            "Skipping non-text WhatsApp message type=%s", msg.get("type")
+                            "Skipping non-text WhatsApp message type=%s",
+                            msg.get("type"),
                         )
                         continue
 

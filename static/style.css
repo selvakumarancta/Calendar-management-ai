@@ -1540,3 +1540,16 @@ html,body {
   .email-controls { display: none; }
   .analytics-stats-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ── RBAC: hide approve/reject actions for admin viewers ── */
+/*
+  Admins are observers — they cannot approve or reject suggestions on
+  behalf of users. Hiding the action buttons enforces this in the UI.
+  The API also enforces it server-side (suggestions are scoped by user_id).
+*/
+body.role-admin .suggestion-actions { display: none !important; }
+body.role-admin .suggestion-retry-row { display: none !important; }
+
+/* ── Admin Dashboard table ── */
+.admin-table tr:hover td { background: var(--surface1); }
+.admin-table td, .admin-table th { vertical-align: middle; }

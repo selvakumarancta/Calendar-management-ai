@@ -31,6 +31,97 @@ def _fire(coro) -> None:  # type: ignore[no-untyped-def]
 
 
 # ---------------------------------------------------------------------------
+# Timezone helper
+# ---------------------------------------------------------------------------
+
+
+def _to_user_tz(dt: "datetime | None", tz_name: str) -> str | None:
+    """Convert a UTC datetime to the user's local timezone and return ISO8601 string."""
+    if dt is None:
+        return None
+    try:
+        import zoneinfo
+
+        user_tz = zoneinfo.ZoneInfo(tz_name or "UTC")
+        local_dt = dt.astimezone(user_tz)
+        return local_dt.isoformat()
+    except Exception:
+        return dt.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Approval email notification (best-effort, fire-and-forget)
+# ---------------------------------------------------------------------------
+
+
+async def _send_approval_notification(user: "User", suggestion: "object") -> None:
+    """Send a confirmation email to the user when their event is approved."""
+    import logging
+    import smtplib
+    import os
+    from datetime import datetime
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    logger = logging.getLogger("calendar_agent.email_notify")
+
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+    smtp_user = os.environ.get("SMTP_USERNAME", "")
+    from_email = os.environ.get("SMTP_FROM_EMAIL", "noreply@calendar-agent.local")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+
+    if not smtp_host or not smtp_password:
+        logger.info("SMTP not configured — skipping approval notification for %s", user.email)
+        return
+
+    try:
+        import zoneinfo
+        user_tz = zoneinfo.ZoneInfo(user.timezone or "UTC")
+
+        title = getattr(suggestion, "title", "Meeting")
+        start = getattr(suggestion, "proposed_start", None)
+        end = getattr(suggestion, "proposed_end", None)
+
+        start_str = start.astimezone(user_tz).strftime("%A, %d %B %Y at %I:%M %p %Z") if start else "TBD"
+        end_str = end.astimezone(user_tz).strftime("%I:%M %p %Z") if end else ""
+
+        time_display = f"{start_str}" + (f" – {end_str}" if end_str else "")
+
+        subject = f"✅ Event Scheduled: {title}"
+        body_html = f"""
+<html><body style="font-family:sans-serif;color:#333;max-width:560px;margin:auto">
+<h2 style="color:#2563eb">📅 Event Confirmed</h2>
+<p>Your calendar event has been scheduled successfully.</p>
+<table style="border-collapse:collapse;width:100%;margin:16px 0">
+  <tr><td style="padding:8px;background:#f1f5f9;font-weight:bold;width:120px">Event</td>
+      <td style="padding:8px">{title}</td></tr>
+  <tr><td style="padding:8px;background:#f1f5f9;font-weight:bold">When</td>
+      <td style="padding:8px">{time_display}</td></tr>
+  <tr><td style="padding:8px;background:#f1f5f9;font-weight:bold">Timezone</td>
+      <td style="padding:8px">{user.timezone}</td></tr>
+</table>
+<p style="color:#64748b;font-size:12px">This event has been added to your Google Calendar automatically.</p>
+</body></html>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = from_email
+        msg["To"] = user.email
+        msg.attach(MIMEText(body_html, "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_password)
+            smtp.sendmail(from_email, [user.email], msg.as_string())
+
+        logger.info("Approval notification sent to %s", user.email)
+    except Exception as exc:
+        logger.warning("Failed to send approval notification: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
 
@@ -188,10 +279,12 @@ async def get_suggestions(
             "priority": s.priority.value,
             "title": s.title,
             "description": s.description[:500],
-            "proposed_start": (
-                s.proposed_start.isoformat() if s.proposed_start else None
-            ),
-            "proposed_end": s.proposed_end.isoformat() if s.proposed_end else None,
+            # Times displayed in the user's local timezone
+            "proposed_start": _to_user_tz(s.proposed_start, current_user.timezone),
+            "proposed_end": _to_user_tz(s.proposed_end, current_user.timezone),
+            "proposed_start_utc": s.proposed_start.isoformat() if s.proposed_start else None,
+            "proposed_end_utc": s.proposed_end.isoformat() if s.proposed_end else None,
+            "timezone": current_user.timezone,
             "location": s.location,
             "attendees": s.attendees,
             "status": s.status.value,
@@ -209,11 +302,10 @@ class ApproveRequest(BaseModel):
     """Optional time overrides when the suggestion has no extracted start/end time."""
 
     start_time: str | None = Field(
-        default=None, description="ISO8601 override start time (required if suggestion has no time)"
+        default=None,
+        description="ISO8601 override start time (required if suggestion has no time)",
     )
-    end_time: str | None = Field(
-        default=None, description="ISO8601 override end time"
-    )
+    end_time: str | None = Field(default=None, description="ISO8601 override end time")
 
 
 @email_router.post("/suggestions/{suggestion_id}/approve")
@@ -227,6 +319,10 @@ async def approve_suggestion(
 
     When the suggestion has no extracted time, pass ``start_time`` (ISO8601)
     in the request body; ``end_time`` defaults to ``start_time + 1 hour``.
+
+    After approval:
+    - Calendar event is created in the user's Google Calendar
+    - Email notification is sent to the user confirming the event (in their timezone)
     """
     from datetime import datetime, timedelta, timezone
 
@@ -243,14 +339,18 @@ async def approve_suggestion(
             if override_start.tzinfo is None:
                 override_start = override_start.replace(tzinfo=timezone.utc)
         except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid start_time format; use ISO8601")
+            raise HTTPException(
+                status_code=422, detail="Invalid start_time format; use ISO8601"
+            )
         if body.end_time:
             try:
                 override_end = datetime.fromisoformat(body.end_time)
                 if override_end.tzinfo is None:
                     override_end = override_end.replace(tzinfo=timezone.utc)
             except ValueError:
-                raise HTTPException(status_code=422, detail="Invalid end_time format; use ISO8601")
+                raise HTTPException(
+                    status_code=422, detail="Invalid end_time format; use ISO8601"
+                )
         else:
             override_end = override_start + timedelta(hours=1)
 
@@ -261,7 +361,8 @@ async def approve_suggestion(
     )
 
     result = await service.approve_suggestion(
-        suggestion_id, current_user.id,
+        suggestion_id,
+        current_user.id,
         override_start=override_start,
         override_end=override_end,
     )
@@ -273,14 +374,21 @@ async def approve_suggestion(
     cache = container.cache()
     await cache.delete(f"events:{current_user.id}:*")
 
+    # --- Email notification to the user (in their timezone) ---
+    _fire(_send_approval_notification(current_user, result))
+
+    # Convert times to user's timezone for the response
+    user_tz_start = _to_user_tz(result.proposed_start, current_user.timezone)
+    user_tz_end = _to_user_tz(result.proposed_end, current_user.timezone)
+
     return {
         "status": "approved",
         "title": result.title,
         "calendar_event_id": result.calendar_event_id,
         "event_created": bool(result.calendar_event_id),
-        "proposed_start": (
-            result.proposed_start.isoformat() if result.proposed_start else None
-        ),
+        "proposed_start": user_tz_start,
+        "proposed_end": user_tz_end,
+        "timezone": current_user.timezone,
     }
 
 

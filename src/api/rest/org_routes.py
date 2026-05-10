@@ -1431,13 +1431,13 @@ async def get_whatsapp_config(
         raise HTTPException(status_code=403, detail=e.message)
 
     result = await session.execute(
-        select(OrgWhatsAppConfigModel).where(
-            OrgWhatsAppConfigModel.org_id == org_id
-        )
+        select(OrgWhatsAppConfigModel).where(OrgWhatsAppConfigModel.org_id == org_id)
     )
     cfg = result.scalar_one_or_none()
     if cfg is None:
-        raise HTTPException(status_code=404, detail="WhatsApp not configured for this org")
+        raise HTTPException(
+            status_code=404, detail="WhatsApp not configured for this org"
+        )
 
     return WhatsAppConfigResponse(
         org_id=str(cfg.org_id),

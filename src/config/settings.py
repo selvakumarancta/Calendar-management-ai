@@ -105,10 +105,12 @@ class Settings(BaseSettings):
     invite_accept_webhook_url: str = ""
 
     # --- WhatsApp (Meta Cloud API) ---
-    whatsapp_verify_token: str = "calendar-agent-whatsapp"  # any secret string for webhook verification
-    whatsapp_access_token: str = ""   # Meta permanent access token
+    whatsapp_verify_token: str = (
+        "calendar-agent-whatsapp"  # any secret string for webhook verification
+    )
+    whatsapp_access_token: str = ""  # Meta permanent access token
     whatsapp_phone_number_id: str = ""  # Meta phone number ID
-    whatsapp_webhook_secret: str = ""   # optional HMAC secret for payload verification
+    whatsapp_webhook_secret: str = ""  # optional HMAC secret for payload verification
 
     # --- Monitoring ---
     langsmith_api_key: str = ""

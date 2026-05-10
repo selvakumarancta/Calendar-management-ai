@@ -339,13 +339,15 @@ class Container:
             )
 
             db = self.database()
-            self._instances["whatsapp_intelligence_service"] = WhatsAppIntelligenceService(
-                message_hook_service=self.message_hook_service(),
-                calendar_adapter=self.calendar_adapter(),
-                db_session_factory=db.session_factory,
-                whatsapp_adapter=self.whatsapp_webhook_adapter(),
-                access_token=self._settings.whatsapp_access_token,
-                phone_number_id=self._settings.whatsapp_phone_number_id,
+            self._instances["whatsapp_intelligence_service"] = (
+                WhatsAppIntelligenceService(
+                    message_hook_service=self.message_hook_service(),
+                    calendar_adapter=self.calendar_adapter(),
+                    db_session_factory=db.session_factory,
+                    whatsapp_adapter=self.whatsapp_webhook_adapter(),
+                    access_token=self._settings.whatsapp_access_token,
+                    phone_number_id=self._settings.whatsapp_phone_number_id,
+                )
             )
         return self._instances["whatsapp_intelligence_service"]
 

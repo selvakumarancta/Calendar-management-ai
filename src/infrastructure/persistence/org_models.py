@@ -167,9 +167,7 @@ class OrgWhatsAppConfigModel(Base):
     verify_token: Mapped[str] = mapped_column(
         String(255), nullable=False, default="calendar-agent-whatsapp"
     )
-    webhook_secret: Mapped[str] = mapped_column(
-        String(255), nullable=False, default=""
-    )
+    webhook_secret: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     auto_reply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)

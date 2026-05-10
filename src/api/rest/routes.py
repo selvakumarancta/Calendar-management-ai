@@ -260,11 +260,14 @@ async def google_calendar_scope_check(
     cal = container.calendar_adapter()
     tokens = await cal._get_google_tokens(current_user.id)
     if not tokens:
-        return {"calendar_scope_ok": False, "reason": "No Google tokens found. Connect Google account first."}
+        return {
+            "calendar_scope_ok": False,
+            "reason": "No Google tokens found. Connect Google account first.",
+        }
 
     try:
-        from googleapiclient.discovery import build
         from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
 
         creds = Credentials(
             token=tokens["access_token"],
@@ -374,41 +377,42 @@ async def google_callback(
 
         # 4. Also upsert a stand-alone ProviderConnection (org_id = user's own UUID
         #    used as a personal-account sentinel so GmailEmailAdapter finds tokens).
+        from sqlalchemy import update as _sql_update
+
         from src.infrastructure.persistence.org_models import ProviderConnectionModel
 
-        existing = await session.execute(
-            select(ProviderConnectionModel).where(
+        # Deactivate ALL existing Google connections for this user — on
+        # reconnect we always want exactly one active connection with the
+        # freshest full-scope token. This prevents the token selector from
+        # accidentally picking a stale read-only token from an older row.
+        await session.execute(
+            _sql_update(ProviderConnectionModel)
+            .where(
                 ProviderConnectionModel.user_id == user.id,
                 ProviderConnectionModel.provider == "google",
-                ProviderConnectionModel.org_id == user.id,  # personal sentinel
             )
+            .values(status="inactive")
         )
-        conn_model = existing.scalar_one_or_none()
-        if conn_model:
-            conn_model.access_token = enc_access
-            conn_model.refresh_token = enc_refresh
-            conn_model.token_expiry = tokens["expiry"]
-            conn_model.provider_email = google_email
-            conn_model.status = "active"
-        else:
-            conn_model = ProviderConnectionModel(
-                id=_uuid.uuid4(),
-                org_id=user.id,  # personal account sentinel
-                user_id=user.id,
-                provider="google",
-                provider_email=google_email,
-                status="active",
-                access_token=enc_access,
-                refresh_token=enc_refresh,
-                token_expiry=tokens["expiry"],
-                scopes=" ".join(
-                    [
-                        "https://www.googleapis.com/auth/calendar",
-                        "https://www.googleapis.com/auth/gmail.readonly",
-                    ]
-                ),
-            )
-            session.add(conn_model)
+
+        # Now create a fresh active connection with the new token
+        conn_model = ProviderConnectionModel(
+            id=_uuid.uuid4(),
+            org_id=user.id,  # personal account sentinel
+            user_id=user.id,
+            provider="google",
+            provider_email=google_email,
+            status="active",
+            access_token=enc_access,
+            refresh_token=enc_refresh,
+            token_expiry=tokens["expiry"],
+            scopes=" ".join(
+                [
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                ]
+            ),
+        )
+        session.add(conn_model)
 
         jwt_svc = container.jwt_service()
         jwt_access = jwt_svc.create_access_token(user)
@@ -419,6 +423,8 @@ async def google_callback(
     import html as _html
 
     safe_name = _html.escape(google_name)
+    # After reconnect redirect to /?reconnected=1 so the frontend auto-syncs local events
+    redirect_path = "/?reconnected=1" if state == "reconnect" else "/"
     # Embed JWTs via a data attribute — never string-interpolated inside <script>
     return HTMLResponse(
         f"""<!DOCTYPE html>
@@ -427,7 +433,8 @@ async def google_callback(
 <body style="background:#0f0f11;color:#e4e4eb;font-family:sans-serif;
              display:flex;align-items:center;justify-content:center;height:100vh"
       data-access="{jwt_access}"
-      data-refresh="{jwt_refresh}">
+      data-refresh="{jwt_refresh}"
+      data-redirect="{redirect_path}">
   <div style="text-align:center">
     <h2>&#x2705; Signed in as {safe_name}</h2>
     <p>Redirecting to Calendar Agent&hellip;</p>
@@ -435,7 +442,7 @@ async def google_callback(
       var b = document.body;
       localStorage.setItem('token', b.dataset.access);
       localStorage.setItem('refresh_token', b.dataset.refresh);
-      window.location.href = '/';
+      window.location.href = b.dataset.redirect;
     </script>
     <p><a href="/" style="color:#8b5cf6">Click here if not redirected</a></p>
   </div>
@@ -585,6 +592,7 @@ async def get_profile(
         name=current_user.name,
         timezone=current_user.timezone,
         plan=current_user.plan.value,
+        system_role=current_user.system_role.value,
         monthly_requests_used=monthly_used,
         monthly_request_limit=current_user.get_request_limit(),
     )
@@ -976,6 +984,7 @@ async def update_profile(
         name=name or current_user.name,
         timezone=timezone or current_user.timezone,
         plan=current_user.plan.value,
+        system_role=current_user.system_role.value,
         monthly_requests_used=monthly_used,
         monthly_request_limit=current_user.get_request_limit(),
     )
@@ -1328,7 +1337,8 @@ async def sync_local_events_to_google(
     container: Container = Depends(get_container),
 ) -> dict:
     """Find calendar events stored only locally (provider_event_id starts with 'mem-')
-    and re-create them in Google Calendar. Returns counts of synced and failed events."""
+    and re-create them in Google Calendar. Returns counts of synced and failed events.
+    """
     from sqlalchemy import select
 
     from src.infrastructure.persistence.calendar_event_model import CalendarEventModel
@@ -1359,7 +1369,9 @@ async def sync_local_events_to_google(
                 end_time=ev_model.end_time,
             )
             created = await cal_adapter.create_event(current_user.id, event)
-            if created.provider_event_id and not created.provider_event_id.startswith("mem-"):
+            if created.provider_event_id and not created.provider_event_id.startswith(
+                "mem-"
+            ):
                 # Update old mem- row with the new Google Calendar ID
                 async with db.session_factory() as session:
                     old = await session.get(CalendarEventModel, ev_model.id)
@@ -1372,6 +1384,7 @@ async def sync_local_events_to_google(
         except Exception as e:
             failed += 1
             import logging
+
             logging.getLogger(__name__).warning(
                 "sync_local_to_google failed for %s: %s", ev_model.title, e
             )

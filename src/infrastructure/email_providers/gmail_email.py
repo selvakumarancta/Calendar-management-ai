@@ -36,8 +36,6 @@ class GmailEmailAdapter(EmailProviderPort):
 
     async def _get_service(self, user_id: uuid.UUID) -> Any:
         """Build an authorized Gmail API service, auto-refreshing the token if expired."""
-        from google.auth.exceptions import RefreshError
-        from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
@@ -97,22 +95,62 @@ class GmailEmailAdapter(EmailProviderPort):
 
         if should_refresh:
             try:
-                import asyncio
+                import datetime as _dt
+                import httpx
 
-                await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: credentials.refresh(Request())
-                )
-                # Persist refreshed tokens + new expiry back to DB
-                if credentials.token and self._db_session_factory:
-                    new_enc_access = encrypt_token(credentials.token)
-                    new_enc_refresh = encrypt_token(credentials.refresh_token or "")
-                    await self._save_refreshed_tokens(
-                        user_id,
-                        new_enc_access,
-                        new_enc_refresh,
-                        expiry=credentials.expiry,
+                # Use httpx directly — avoids macOS thread DNS issues that affect
+                # google-auth's blocking requests.Request() in run_in_executor.
+                async with httpx.AsyncClient() as _hc:
+                    _resp = await _hc.post(
+                        "https://oauth2.googleapis.com/token",
+                        data={
+                            "client_id": self._client_id,
+                            "client_secret": self._client_secret,
+                            "refresh_token": refresh_token,
+                            "grant_type": "refresh_token",
+                        },
+                        timeout=15.0,
                     )
-            except RefreshError as e:
+                if _resp.status_code == 200:
+                    _tok = _resp.json()
+                    new_access = _tok["access_token"]
+                    new_refresh = _tok.get("refresh_token") or refresh_token
+                    _expires_in = _tok.get("expires_in", 3600)
+                    new_expiry = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(
+                        seconds=_expires_in
+                    )
+                    # Update in-memory credentials so the service build uses fresh token
+                    credentials._token = new_access  # type: ignore[attr-defined]
+                    credentials._refresh_token = new_refresh  # type: ignore[attr-defined]
+                    credentials.expiry = new_expiry.replace(tzinfo=None)
+                    # Persist refreshed tokens + new expiry back to DB
+                    if self._db_session_factory:
+                        new_enc_access = encrypt_token(new_access)
+                        new_enc_refresh = encrypt_token(new_refresh)
+                        await self._save_refreshed_tokens(
+                            user_id,
+                            new_enc_access,
+                            new_enc_refresh,
+                            expiry=new_expiry,
+                        )
+                else:
+                    _err = _resp.json().get("error", "unknown")
+                    if _err == "invalid_client":
+                        logger.error(
+                            "Gmail token refresh: invalid_client for user %s. "
+                            "GOOGLE_CLIENT_SECRET in .env is wrong — update it from "
+                            "Google Cloud Console → APIs & Services → Credentials.",
+                            user_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Gmail token refresh failed for user %s: HTTP %s %s — "
+                            "using existing token",
+                            user_id,
+                            _resp.status_code,
+                            _resp.text[:200],
+                        )
+            except Exception as e:
                 logger.warning(
                     "Gmail token refresh failed for user %s: %s — using existing token",
                     user_id,

@@ -95,16 +95,3 @@ class GoogleOAuthService:
             }
         except Exception as e:
             raise AuthenticationError(f"OAuth code exchange failed: {e}") from e
-            credentials = flow.credentials
-
-            return {
-                "access_token": credentials.token,
-                "refresh_token": credentials.refresh_token,
-                "expiry": (
-                    credentials.expiry.replace(tzinfo=timezone.utc)
-                    if credentials.expiry
-                    else datetime.now(timezone.utc)
-                ),
-            }
-        except Exception as e:
-            raise AuthenticationError(f"OAuth code exchange failed: {e}") from e

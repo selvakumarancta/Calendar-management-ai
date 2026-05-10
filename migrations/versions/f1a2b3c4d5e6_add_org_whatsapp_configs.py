@@ -1,6 +1,6 @@
 """add org_whatsapp_configs table
 
-Revision ID: f1a2b3c4d5e6
+Revision ID: fb1c2d3e4f5a
 Revises: 872d480b4cb5
 Create Date: 2026-04-20
 
@@ -10,10 +10,10 @@ Each org gets one row keyed by org_id.  The webhook router dispatches
 incoming messages to the correct org based on the phone_number_id.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
-revision = "f1a2b3c4d5e6"
+revision = "fb1c2d3e4f5a"
 down_revision = "872d480b4cb5"
 branch_labels = None
 depends_on = None

@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.entities.user import SubscriptionPlan, User
+from src.domain.entities.user import SubscriptionPlan, SystemRole, User
 from src.domain.interfaces.user_repository import UserRepositoryPort
 from src.infrastructure.persistence.models import UserModel
 
@@ -51,6 +51,7 @@ class SQLAlchemyUserRepository(UserRepositoryPort):
             model.name = user.name
             model.timezone = user.timezone
             model.plan = user.plan.value
+            model.system_role = user.system_role.value
             model.is_active = user.is_active
             model.google_access_token = user.google_access_token
             model.google_refresh_token = user.google_refresh_token
@@ -85,6 +86,7 @@ class SQLAlchemyUserRepository(UserRepositoryPort):
             name=model.name,
             timezone=model.timezone,
             plan=SubscriptionPlan(model.plan),
+            system_role=SystemRole(getattr(model, "system_role", "user")),
             is_active=model.is_active,
             google_access_token=model.google_access_token,
             google_refresh_token=model.google_refresh_token,
