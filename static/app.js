@@ -1134,9 +1134,31 @@ async function loadProfile() {
     const tzEl   = document.getElementById("profile-timezone");
     if (nameEl) nameEl.value = u.name || "";
     if (tzEl)   tzEl.value  = u.timezone || "";
+
+    // Populate personal booking URL (Cal.com-style)
+    const bookingInput = document.getElementById("booking-url-input");
+    const bookingLink  = document.getElementById("booking-url-link");
+    if (bookingInput && u.email) {
+      const slug = u.email.split("@")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const bookUrl = `${window.location.origin}/book/${slug}`;
+      bookingInput.value = bookUrl;
+      if (bookingLink) bookingLink.href = bookUrl;
+    }
   } catch (err) {
     el.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
   }
+}
+
+function copyBookingUrl() {
+  const input = document.getElementById("booking-url-input");
+  if (!input || !input.value) return;
+  navigator.clipboard.writeText(input.value).then(() => {
+    showToast("📋 Booking link copied to clipboard!");
+  }).catch(() => {
+    input.select();
+    document.execCommand("copy");
+    showToast("📋 Booking link copied!");
+  });
 }
 
 async function saveProfile() {

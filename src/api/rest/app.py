@@ -338,6 +338,21 @@ def create_app() -> FastAPI:
         async def _spa_root() -> FileResponse:
             return FileResponse(str(_static_dir / "index.html"))
 
+        # ── Public scheduling pages (no auth required) ──────────────────
+        _schedule_html = _static_dir / "schedule.html"
+        if _schedule_html.exists():
+            @app.get("/schedule/{link_id}", include_in_schema=False)
+            async def _schedule_page(link_id: str) -> FileResponse:  # noqa: ARG001
+                return FileResponse(str(_schedule_html))
+
+            @app.get("/book/{username}", include_in_schema=False)
+            async def _book_page(username: str) -> FileResponse:  # noqa: ARG001
+                return FileResponse(str(_schedule_html))
+
+    # ── Persistent personal booking API (no auth) ───────────────────────────
+    from src.api.rest.booking_routes import booking_router
+    app.include_router(booking_router, prefix="/api/v1/public", tags=["Public Booking"])
+
     return app
 
 

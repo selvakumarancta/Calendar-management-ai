@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Book a Meeting</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface0: #161b27;
+      --surface1: #1e2535;
+      --surface2: #252d3d;
+      --border:   rgba(255,255,255,.08);
+      --accent:   #6366f1;
+      --accent2:  #818cf8;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --text1:    #f1f5f9;
+      --text2:    #94a3b8;
+      --text3:    #64748b;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text1);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    /* ── Layout ── */
+    .card {
+      background: var(--surface0);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 860px;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,.4);
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+    }
+
+    @media (max-width: 640px) {
+      .card-grid { grid-template-columns: 1fr; }
+      .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      padding: 2rem 1.5rem;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .host-avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .host-name {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text1);
+    }
+
+    .meeting-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text1);
+      line-height: 1.3;
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      font-size: .83rem;
+      color: var(--text2);
+    }
+
+    .meta-icon { font-size: .95rem; }
+
+    .powered-by {
+      margin-top: auto;
+      padding-top: 1rem;
+      font-size: .73rem;
+      color: var(--text3);
+    }
+    .powered-by a { color: var(--accent2); text-decoration: none; }
+
+    /* ── Right panel ── */
+    .main-panel {
+      padding: 2rem 1.5rem;
+      min-height: 480px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* steps */
+    .step { display: none; flex-direction: column; gap: 1.25rem; flex: 1; }
+    .step.active { display: flex; }
+
+    .step-title {
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--text3);
+      text-transform: uppercase;
+    }
+
+    /* ── Calendar nav ── */
+    .cal-nav {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+
+    .cal-nav h3 {
+      flex: 1;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .nav-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface1);
+      color: var(--text2);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .9rem;
+      transition: all .15s;
+    }
+    .nav-btn:hover { background: var(--surface2); color: var(--text1); }
+
+    /* ── Day strip ── */
+    .day-strip {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: .35rem;
+    }
+
+    .day-col { display: flex; flex-direction: column; align-items: center; gap: .3rem; }
+
+    .day-label {
+      font-size: .7rem;
+      color: var(--text3);
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .day-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: .85rem;
+      font-weight: 500;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .day-btn:hover:not(:disabled) {
+      background: var(--surface2);
+      color: var(--text1);
+    }
+
+    .day-btn.selected {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .day-btn.today {
+      border-color: var(--accent2);
+      color: var(--accent2);
+    }
+
+    .day-btn.today.selected { color: white; }
+
+    .day-btn:disabled {
+      opacity: .3;
+      cursor: not-allowed;
+    }
+
+    .day-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity .15s;
+    }
+    .day-dot.has-slots { opacity: 1; }
+
+    /* ── Time slots ── */
+    .slots-panel {
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+      max-height: 340px;
+      overflow-y: auto;
+      padding-right: .25rem;
+    }
+
+    .slots-panel::-webkit-scrollbar { width: 4px; }
+    .slots-panel::-webkit-scrollbar-track { background: transparent; }
+    .slots-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .slot-btn {
+      padding: .7rem 1rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface1);
+      color: var(--text1);
+      font-size: .9rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: left;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .slot-btn:hover {
+      background: var(--surface2);
+      border-color: var(--accent);
+    }
+
+    .slot-btn.selected {
+      background: rgba(99,102,241,.15);
+      border-color: var(--accent);
+      color: var(--accent2);
+    }
+
+    .slot-tz {
+      font-size: .73rem;
+      color: var(--text3);
+    }
+
+    /* ── Form ── */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: .4rem;
+    }
+
+    label {
+      font-size: .8rem;
+      font-weight: 500;
+      color: var(--text2);
+    }
+
+    .input {
+      background: var(--surface1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .65rem .9rem;
+      color: var(--text1);
+      font-size: .9rem;
+      font-family: inherit;
+      outline: none;
+      width: 100%;
+      transition: border-color .15s;
+    }
+
+    .input:focus { border-color: var(--accent); }
+    .input::placeholder { color: var(--text3); }
+
+    textarea.input {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: .7rem 1.4rem;
+      border-radius: 9px;
+      border: none;
+      font-family: inherit;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-primary:hover { background: #5153c8; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-ghost {
+      background: var(--surface2);
+      color: var(--text2);
+    }
+    .btn-ghost:hover { color: var(--text1); background: var(--surface1); border: 1px solid var(--border); }
+
+    .btn-row {
+      display: flex;
+      gap: .75rem;
+      margin-top: auto;
+      padding-top: .5rem;
+    }
+
+    /* ── Empty & loading states ── */
+    .empty-slots {
+      text-align: center;
+      color: var(--text3);
+      padding: 2rem;
+      font-size: .88rem;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 1.5rem auto;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Confirmation ── */
+    .confirm-card {
+      text-align: center;
+      padding: 2rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      flex: 1;
+    }
+
+    .confirm-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(34,197,94,.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+    }
+
+    .confirm-card h2 {
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    .confirm-details {
+      background: var(--surface1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      width: 100%;
+      max-width: 380px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: .6rem;
+    }
+
+    .confirm-row {
+      display: flex;
+      gap: .75rem;
+      font-size: .85rem;
+    }
+
+    .confirm-row-icon { font-size: 1rem; flex-shrink: 0; }
+    .confirm-row-text { color: var(--text2); }
+    .confirm-row-text strong { color: var(--text1); display: block; }
+
+    /* ── Error banner ── */
+    .error-banner {
+      background: rgba(239,68,68,.1);
+      border: 1px solid rgba(239,68,68,.3);
+      border-radius: 8px;
+      padding: .65rem .9rem;
+      color: #fca5a5;
+      font-size: .83rem;
+      display: none;
+    }
+
+    /* ── Expired/404 ── */
+    .expired-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 3rem 2rem;
+      gap: 1rem;
+      min-height: 300px;
+    }
+
+    .expired-icon { font-size: 3rem; }
+    .expired-card h2 { font-size: 1.3rem; font-weight: 700; color: var(--text1); }
+    .expired-card p { font-size: .9rem; color: var(--text2); max-width: 300px; }
+  </style>
+</head>
+<body>
+
+<div class="card" id="main-card">
+  <!-- Loading state -->
+  <div style="padding:4rem;text-align:center" id="loading-state">
+    <div class="spinner"></div>
+    <p style="color:var(--text3);font-size:.88rem">Loading availability…</p>
+  </div>
+
+  <!-- Error/expired state (shown if link invalid) -->
+  <div class="expired-card" id="expired-state" style="display:none">
+    <div class="expired-icon">🔗</div>
+    <h2 id="expired-title">Link Not Found</h2>
+    <p id="expired-msg">This scheduling link has expired or is no longer valid.</p>
+  </div>
+
+  <!-- Main booking UI -->
+  <div class="card-grid" id="booking-ui" style="display:none">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="host-avatar" id="host-avatar">?</div>
+      <div>
+        <div class="host-name" id="host-name">Loading…</div>
+        <div style="font-size:.8rem;color:var(--text3)" id="host-email"></div>
+      </div>
+      <div class="meeting-title" id="meeting-title">Meeting</div>
+      <div class="meta-row"><span class="meta-icon">⏱</span><span id="meta-duration">30 min</span></div>
+      <div class="meta-row"><span class="meta-icon">🌐</span><span id="meta-tz"></span></div>
+      <div class="meta-row" id="meta-subject-row" style="display:none">
+        <span class="meta-icon">💬</span><span id="meta-subject" style="font-size:.78rem"></span>
+      </div>
+      <div class="powered-by">Powered by <a href="/" target="_blank">Calendar AI</a></div>
+    </aside>
+
+    <!-- Right panel -->
+    <main class="main-panel">
+      <!-- Step 1: Pick a date & time -->
+      <div class="step active" id="step-1">
+        <div class="step-title">Select a Date & Time</div>
+
+        <div class="cal-nav">
+          <button class="nav-btn" id="prev-week" onclick="shiftWeek(-1)">‹</button>
+          <h3 id="week-label">Week</h3>
+          <button class="nav-btn" id="next-week" onclick="shiftWeek(1)">›</button>
+        </div>
+
+        <div class="day-strip" id="day-strip"></div>
+
+        <div class="slots-panel" id="slots-panel">
+          <div class="empty-slots">Select a date to see available times</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-next-1" onclick="goStep2()" disabled>
+            Next <span>→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: Enter details -->
+      <div class="step" id="step-2">
+        <div class="step-title">Your Details</div>
+
+        <div style="background:var(--surface1);border:1px solid var(--border);border-radius:10px;padding:.9rem 1rem;font-size:.85rem;color:var(--text2)" id="selected-time-display">
+          —
+        </div>
+
+        <div class="form-group">
+          <label for="inp-name">Full Name *</label>
+          <input id="inp-name" class="input" type="text" placeholder="Jane Smith" autocomplete="name" required />
+        </div>
+
+        <div class="form-group">
+          <label for="inp-email">Email Address *</label>
+          <input id="inp-email" class="input" type="email" placeholder="jane@company.com" autocomplete="email" required />
+        </div>
+
+        <div class="form-group">
+          <label for="inp-notes">Additional Notes <span style="color:var(--text3)">(optional)</span></label>
+          <textarea id="inp-notes" class="input" placeholder="Anything you'd like the host to know…"></textarea>
+        </div>
+
+        <div class="error-banner" id="book-error"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="goStep1()">← Back</button>
+          <button class="btn btn-primary" id="btn-confirm" onclick="confirmBooking()">
+            Confirm Booking
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Confirmed -->
+      <div class="step" id="step-3">
+        <div class="confirm-card">
+          <div class="confirm-icon">✅</div>
+          <h2>You're booked!</h2>
+          <p style="color:var(--text2);font-size:.9rem">A calendar invite has been sent to your email.</p>
+
+          <div class="confirm-details" id="confirm-details"></div>
+
+          <p style="color:var(--text3);font-size:.8rem;margin-top:.5rem">
+            Check your inbox for a confirmation email with the calendar invite.
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let _link = null;          // link data from API
+let _linkId = null;        // extracted from URL
+let _weekOffset = 0;       // weeks relative to today
+let _selectedDate = null;  // "YYYY-MM-DD"
+let _selectedSlot = null;  // { start, end }
+const _tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("meta-tz").textContent = _tz;
+
+  // Extract link_id from URL path: /schedule/<link_id>
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  // support both /schedule/<id> and /book/<username>
+  _linkId = pathParts[pathParts.length - 1];
+
+  if (!_linkId) {
+    showExpired("Invalid Link", "No scheduling link ID found in URL.");
+    return;
+  }
+
+  loadLink();
+});
+
+// ── Load link data ─────────────────────────────────────────────────────────
+async function loadLink() {
+  try {
+    // support both one-time links and persistent personal links
+    const isPersonal = window.location.pathname.startsWith("/book/");
+    const url = isPersonal
+      ? `/api/v1/public/book/${_linkId}`
+      : `/api/v1/email/scheduling-links/${_linkId}`;
+
+    const res = await fetch(url);
+    if (res.status === 410 || res.status === 404) {
+      showExpired("Link Not Found", "This scheduling link has expired or is no longer valid.");
+      return;
+    }
+    if (!res.ok) throw new Error("Failed to load link");
+
+    _link = await res.json();
+    renderSidebar();
+    renderWeek();
+    document.getElementById("loading-state").style.display = "none";
+    document.getElementById("booking-ui").style.display = "grid";
+  } catch (e) {
+    showExpired("Something went wrong", "Unable to load this scheduling page. Please try again.");
+  }
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const name = _link.host_name || _link.attendee_email?.split("@")[0] || "Host";
+  const initial = name.charAt(0).toUpperCase();
+  document.getElementById("host-avatar").textContent = initial;
+  document.getElementById("host-name").textContent = name;
+  document.getElementById("host-email").textContent = _link.host_email || "";
+  document.getElementById("meeting-title").textContent = _link.subject || "Meeting";
+  document.getElementById("meta-duration").textContent = `${_link.duration_minutes || 30} min`;
+
+  if (_link.subject) {
+    document.getElementById("meta-subject").textContent = _link.subject;
+    document.getElementById("meta-subject-row").style.display = "flex";
+  }
+  document.title = (_link.subject || "Book a Meeting") + " — Calendar AI";
+}
+
+// ── Calendar week ──────────────────────────────────────────────────────────
+function shiftWeek(delta) {
+  _weekOffset += delta;
+  _selectedDate = null;
+  _selectedSlot = null;
+  document.getElementById("btn-next-1").disabled = true;
+  renderWeek();
+  resetSlots();
+}
+
+function renderWeek() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() + _weekOffset * 7);
+
+  // Show Mon–Sun (or Sun–Sat based on locale)
+  const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const month = weekStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  document.getElementById("week-label").textContent = month;
+  document.getElementById("prev-week").disabled = _weekOffset <= 0;
+
+  // Build 7 days starting from weekStart adjusted to Sun
+  const strip = document.getElementById("day-strip");
+  strip.innerHTML = "";
+
+  // Build slots index  for quick lookup
+  const slotsByDate = {};
+  if (_link?.suggested_windows) {
+    for (const w of _link.suggested_windows) {
+      const d = w.start.substring(0, 10);
+      slotsByDate[d] = (slotsByDate[d] || 0) + 1;
+    }
+  }
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    const dateStr = toLocalDate(d);
+    const isPast = d < today;
+
+    const col = document.createElement("div");
+    col.className = "day-col";
+
+    const lbl = document.createElement("div");
+    lbl.className = "day-label";
+    lbl.textContent = dayNames[d.getDay()];
+
+    const btn = document.createElement("button");
+    btn.className = "day-btn";
+    if (dateStr === toLocalDate(today)) btn.classList.add("today");
+    if (dateStr === _selectedDate) btn.classList.add("selected");
+    btn.textContent = d.getDate();
+    btn.disabled = isPast;
+    btn.onclick = () => selectDate(dateStr);
+
+    const dot = document.createElement("div");
+    dot.className = "day-dot";
+    if (slotsByDate[dateStr] > 0 || _link?.mode === "availability") {
+      dot.classList.add("has-slots");
+    }
+
+    col.appendChild(lbl);
+    col.appendChild(btn);
+    col.appendChild(dot);
+    strip.appendChild(col);
+  }
+}
+
+function toLocalDate(d) {
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0");
+}
+
+// ── Slot selection ─────────────────────────────────────────────────────────
+function selectDate(dateStr) {
+  _selectedDate = dateStr;
+  _selectedSlot = null;
+  document.getElementById("btn-next-1").disabled = true;
+
+  // Re-render week to show selection
+  renderWeek();
+  renderSlots(dateStr);
+}
+
+function renderSlots(dateStr) {
+  const panel = document.getElementById("slots-panel");
+  const windows = (_link?.suggested_windows || []).filter(w => w.start.startsWith(dateStr));
+
+  if (!windows.length) {
+    panel.innerHTML = `<div class="empty-slots">No available slots on this day.<br>Try another date.</div>`;
+    return;
+  }
+
+  panel.innerHTML = "";
+  windows.sort((a, b) => a.start.localeCompare(b.start));
+  for (const w of windows) {
+    const btn = document.createElement("button");
+    btn.className = "slot-btn";
+
+    const startLocal = new Date(w.start);
+    const endLocal = new Date(w.end);
+    const timeStr = startLocal.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) +
+      " – " + endLocal.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+    btn.innerHTML = `<span>${timeStr}</span><span class="slot-tz">${_tz}</span>`;
+    btn.onclick = () => selectSlot(w, btn);
+    panel.appendChild(btn);
+  }
+}
+
+function resetSlots() {
+  document.getElementById("slots-panel").innerHTML =
+    `<div class="empty-slots">Select a date to see available times</div>`;
+}
+
+function selectSlot(slot, btnEl) {
+  _selectedSlot = slot;
+  document.querySelectorAll(".slot-btn").forEach(b => b.classList.remove("selected"));
+  btnEl.classList.add("selected");
+  document.getElementById("btn-next-1").disabled = false;
+}
+
+// ── Step navigation ────────────────────────────────────────────────────────
+function goStep2() {
+  if (!_selectedSlot) return;
+
+  const startLocal = new Date(_selectedSlot.start);
+  const endLocal = new Date(_selectedSlot.end);
+  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+  const dateStr = startLocal.toLocaleDateString(undefined, opts);
+  const timeStr = startLocal.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) +
+    " – " + endLocal.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+  document.getElementById("selected-time-display").innerHTML =
+    `<strong style="color:var(--text1)">${dateStr}</strong><br>${timeStr} <span style="color:var(--text3);font-size:.78rem">(${_tz})</span>`;
+
+  setStep(2);
+}
+
+function goStep1() { setStep(1); }
+
+function setStep(n) {
+  document.querySelectorAll(".step").forEach((el, i) => {
+    el.classList.toggle("active", i + 1 === n);
+  });
+}
+
+// ── Booking ────────────────────────────────────────────────────────────────
+async function confirmBooking() {
+  const name = document.getElementById("inp-name").value.trim();
+  const email = document.getElementById("inp-email").value.trim();
+  const errEl = document.getElementById("book-error");
+  errEl.style.display = "none";
+
+  if (!name) { showError("Please enter your name."); return; }
+  if (!email || !email.includes("@")) { showError("Please enter a valid email address."); return; }
+  if (!_selectedSlot) { showError("No time slot selected."); return; }
+
+  const btn = document.getElementById("btn-confirm");
+  btn.disabled = true;
+  btn.textContent = "Booking…";
+
+  try {
+    const isPersonal = window.location.pathname.startsWith("/book/");
+    const url = isPersonal
+      ? `/api/v1/public/book/${_linkId}/confirm`
+      : `/api/v1/email/scheduling-links/${_linkId}/book`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chosen_start: _selectedSlot.start,
+        attendee_name: name,
+        attendee_email: email,
+        notes: document.getElementById("inp-notes").value.trim() || null,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      showError(data.detail || "Booking failed. Please try again.");
+      btn.disabled = false;
+      btn.textContent = "Confirm Booking";
+      return;
+    }
+
+    showConfirmation(name, email, data);
+  } catch (e) {
+    showError("Network error. Please check your connection and try again.");
+    btn.disabled = false;
+    btn.textContent = "Confirm Booking";
+  }
+}
+
+function showError(msg) {
+  const el = document.getElementById("book-error");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+// ── Confirmation screen ────────────────────────────────────────────────────
+function showConfirmation(name, email, data) {
+  const startLocal = new Date(_selectedSlot.start);
+  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+  const dateStr = startLocal.toLocaleDateString(undefined, opts);
+  const timeStr = startLocal.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+  const subject = _link?.subject || "Meeting";
+  const duration = _link?.duration_minutes || 30;
+
+  document.getElementById("confirm-details").innerHTML = `
+    <div class="confirm-row">
+      <span class="confirm-row-icon">📅</span>
+      <div class="confirm-row-text"><strong>${dateStr}</strong>${timeStr} · ${duration} min</div>
+    </div>
+    <div class="confirm-row">
+      <span class="confirm-row-icon">📝</span>
+      <div class="confirm-row-text"><strong>${esc(subject)}</strong></div>
+    </div>
+    <div class="confirm-row">
+      <span class="confirm-row-icon">📧</span>
+      <div class="confirm-row-text">Confirmation sent to <strong>${esc(email)}</strong></div>
+    </div>
+    ${data.meet_link ? `<div class="confirm-row"><span class="confirm-row-icon">🎥</span><div class="confirm-row-text"><a href="${esc(data.meet_link)}" target="_blank" style="color:var(--accent2)">Join with Google Meet</a></div></div>` : ""}
+  `;
+
+  setStep(3);
+}
+
+// ── Expired / error state ──────────────────────────────────────────────────
+function showExpired(title, msg) {
+  document.getElementById("loading-state").style.display = "none";
+  document.getElementById("booking-ui").style.display = "none";
+  document.getElementById("expired-title").textContent = title;
+  document.getElementById("expired-msg").textContent = msg;
+  document.getElementById("expired-state").style.display = "flex";
+}
+
+function esc(str) {
+  return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>

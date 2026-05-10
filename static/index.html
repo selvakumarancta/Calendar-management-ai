@@ -503,6 +503,20 @@
             </div>
           </div>
 
+          <!-- Personal Booking Page -->
+          <div class="card" style="margin-bottom:.75rem">
+            <div class="card-header"><h4>📅 My Booking Page</h4><span class="header-subtitle">Cal.com-style scheduling link</span></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:.65rem">
+              <p style="font-size:.82rem;color:var(--text2)">Share this link so others can book time with you automatically based on your Google Calendar availability.</p>
+              <div style="display:flex;gap:.5rem;align-items:center">
+                <input id="booking-url-input" class="input" type="text" readonly style="flex:1;font-size:.8rem;cursor:pointer;color:var(--accent2)" onclick="this.select()" />
+                <button class="btn btn-primary btn-sm" onclick="copyBookingUrl()">📋 Copy</button>
+                <a id="booking-url-link" href="#" target="_blank" class="btn btn-ghost btn-sm">↗ Open</a>
+              </div>
+              <p style="font-size:.75rem;color:var(--text3)">Anyone with this link can pick a time from your calendar — no login required.</p>
+            </div>
+          </div>
+
           <!-- Edit name / timezone -->
           <div class="card" style="margin-bottom:.75rem">
             <div class="card-header"><h4>Edit Profile</h4></div>
